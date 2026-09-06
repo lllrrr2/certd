@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { notification } from "ant-design-vue";
 import * as basicApi from "./api.basic";
-import { AppInfo, HeaderMenus, PlusInfo, SiteEnv, SiteInfo, SuiteSetting, SysInstallInfo, SysPublicSetting } from "./api.basic";
+import { AppInfo, HeaderMenus, InviteSetting, PlusInfo, SiteEnv, SiteInfo, SuiteSetting, SysInstallInfo, SysPublicSetting } from "./api.basic";
 import { useUserStore } from "../user";
 import { mitter } from "/@/utils/util.mitt";
 import { env } from "/@/utils/util.env";
@@ -30,10 +30,12 @@ export interface SettingState {
   headerMenus?: HeaderMenus;
   inited?: boolean;
   suiteSetting?: SuiteSetting;
+  inviteSetting?: InviteSetting;
   app: {
     version?: string;
     time?: number;
     deltaTime?: number;
+    releaseMode?: string;
   };
   productInfo: {
     notice?: string;
@@ -102,11 +104,13 @@ export const useSettingStore = defineStore({
       menus: [],
     },
     suiteSetting: { enabled: false },
+    inviteSetting: { enabled: false, levelEnabled: false, fixedCommissionRate: 10 },
     inited: false,
     app: {
       version: "",
       time: 0,
       deltaTime: 0,
+      releaseMode: "latest",
     },
     productInfo: {
       notice: "",
@@ -196,6 +200,9 @@ export const useSettingStore = defineStore({
       // @ts-ignore
       return this.suiteSetting?.enabled === true;
     },
+    isInviteCommissionEnabled(): boolean {
+      return this.isComm && this.inviteSetting?.enabled === true;
+    },
   },
   actions: {
     checkPlus() {
@@ -215,6 +222,7 @@ export const useSettingStore = defineStore({
       merge(this.plusInfo, allSettings.plusInfo || {});
       merge(this.headerMenus, allSettings.headerMenus || {});
       merge(this.suiteSetting, allSettings.suiteSetting || {});
+      merge(this.inviteSetting, allSettings.inviteSetting || {});
       //@ts-ignore
       this.initSiteInfo(allSettings.siteInfo || {});
       this.initAppInfo(allSettings.app || {});
@@ -223,6 +231,9 @@ export const useSettingStore = defineStore({
       this.app.time = appInfo.time;
       this.app.version = appInfo.version;
       this.app.deltaTime = new Date().getTime() - this.app.time;
+      if (appInfo.releaseMode) {
+        this.app.releaseMode = appInfo.releaseMode;
+      }
     },
     initSiteInfo(siteInfo: SiteInfo) {
       //@ts-ignore
@@ -316,7 +327,7 @@ export const useSettingStore = defineStore({
       }
       const modalRef: any = Modal.warning({
         title: title,
-        width: 500,
+        width: 600,
         keyboard: false,
         closable,
         content: () => {
@@ -328,7 +339,7 @@ export const useSettingStore = defineStore({
                   <a-tag color="green">{bindUrl || "未占用"}</a-tag>
                 </span>
                 <a-button type="primary" onClick={() => doBindRequest("url")}>
-                  绑定到地址1
+                  绑定当前URL到地址1
                 </a-button>
               </div>
               <div class="helper">各类通知里面会以地址1作为URL显示</div>
@@ -338,7 +349,7 @@ export const useSettingStore = defineStore({
                   <a-tag color="green">{bindUrl2 || "未占用"}</a-tag>
                 </span>
                 <a-button type="primary" onClick={() => doBindRequest("url2")}>
-                  绑定到地址2
+                  绑定当前URL到地址2
                 </a-button>
               </div>
             </div>
@@ -379,9 +390,18 @@ export const useSettingStore = defineStore({
       this.loadProductInfo();
       this.inited = true;
     },
+    getSiteId() {
+      return this.installInfo?.siteId || "";
+    },
   },
 });
 
 mitter.on("app.login", async () => {
   await useSettingStore().init();
+  try {
+    const { loadPreferencesFromAccount } = await import("/@/vben/layouts/widgets/preferences/account-sync");
+    await loadPreferencesFromAccount();
+  } catch (e) {
+    console.error("加载账号偏好设置失败", e);
+  }
 });

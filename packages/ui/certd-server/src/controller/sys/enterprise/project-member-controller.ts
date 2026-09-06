@@ -4,6 +4,7 @@ import { ProjectMemberEntity } from "../../../modules/sys/enterprise/entity/proj
 import { ProjectMemberService } from "../../../modules/sys/enterprise/service/project-member-service.js";
 import { merge } from "lodash-es";
 import { ProjectService } from "../../../modules/sys/enterprise/service/project-service.js";
+import { AuditType } from "../../../modules/sys/enterprise/service/audit-constants.js";
 
 /**
  */
@@ -15,7 +16,6 @@ export class SysProjectMemberController extends CrudController<ProjectMemberEnti
 
   @Inject()
   sysSettingsService: SysSettingsService;
-
   @Inject()
   projectService: ProjectService;
 
@@ -23,18 +23,22 @@ export class SysProjectMemberController extends CrudController<ProjectMemberEnti
     return this.service;
   }
 
-  @Post("/page", { description: "sys:settings:view" })
+  getAuditType(): string {
+    return AuditType.enterprise.value;
+  }
+
+  @Post("/page", { description: "sys:settings:view", summary: "查询项目成员分页列表" })
   async page(@Body(ALL) body: any) {
     body.query = body.query ?? {};
     return await super.page(body);
   }
 
-  @Post("/list", { description: "sys:settings:view" })
+  @Post("/list", { description: "sys:settings:view", summary: "查询项目成员列表" })
   async list(@Body(ALL) body: any) {
     return super.list(body);
   }
 
-  @Post("/add", { description: "sys:settings:edit" })
+  @Post("/add", { description: "sys:settings:edit", summary: "添加项目成员" })
   async add(@Body(ALL) bean: any) {
     const def: any = {
       isDefault: false,
@@ -47,67 +51,73 @@ export class SysProjectMemberController extends CrudController<ProjectMemberEnti
       projectId: bean.projectId,
     });
 
-    return super.add(bean);
+    const res = await super.add(bean);
+    await this.auditLog({ content: `添加了项目成员(ID:${res.data})` });
+    return res;
   }
 
-  @Post("/update", { description: "sys:settings:edit" })
+  @Post("/update", { description: "sys:settings:edit", summary: "更新项目成员" })
   async update(@Body(ALL) bean: any) {
     if (!bean.id) {
       throw new Error("id is required");
     }
-    const projectId = await this.service.getProjectId(bean.id)
+    const projectId = await this.service.getProjectId(bean.id);
     await this.projectService.checkAdminPermission({
       userId: this.getUserId(),
       projectId: projectId,
     });
-    const res =await this.service.update({
+    const res = await this.service.update({
       id: bean.id,
       permission: bean.permission,
       status: bean.status,
     });
+    await this.auditLog({ content: `更新了项目成员(ID:${bean.id})` });
     return this.ok(res);
   }
 
-  @Post("/info", { description: "sys:settings:view" })
+  @Post("/info", { description: "sys:settings:view", summary: "查询项目成员详情" })
   async info(@Query("id") id: number) {
-     if (!id) {
+    if (!id) {
       throw new Error("id is required");
     }
-    const projectId = await this.service.getProjectId(id)
+    const projectId = await this.service.getProjectId(id);
     await this.projectService.checkReadPermission({
       userId: this.getUserId(),
-      projectId:projectId,
+      projectId: projectId,
     });
     return super.info(id);
   }
 
-  @Post("/delete", { description: "sys:settings:edit" })
+  @Post("/delete", { description: "sys:settings:edit", summary: "删除项目成员" })
   async delete(@Query("id") id: number) {
     if (!id) {
       throw new Error("id is required");
     }
-    const projectId = await this.service.getProjectId(id)
+    const projectId = await this.service.getProjectId(id);
     await this.projectService.checkAdminPermission({
       userId: this.getUserId(),
-      projectId:projectId,
+      projectId: projectId,
     });
-    return super.delete(id);
+    const res = await super.delete(id);
+    await this.auditLog({ content: `删除了项目成员(ID:${id})` });
+    return res;
   }
 
-  @Post("/deleteByIds", { description: "sys:settings:edit" })
+  @Post("/deleteByIds", { description: "sys:settings:edit", summary: "批量删除项目成员" })
   async deleteByIds(@Body("ids") ids: number[]) {
     for (const id of ids) {
       if (!id) {
         throw new Error("id is required");
       }
-      const projectId = await this.service.getProjectId(id)
+      const projectId = await this.service.getProjectId(id);
       await this.projectService.checkAdminPermission({
         userId: this.getUserId(),
-        projectId:projectId,
+        projectId: projectId,
       });
       await this.service.delete(id as any);
     }
-   
+
+    await this.auditLog({ content: `批量删除了${ids.length}个项目成员` });
     return this.ok({});
   }
 }

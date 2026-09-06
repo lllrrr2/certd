@@ -11,14 +11,16 @@ import yaml from "js-yaml";
   icon: "svg:icon-tencentcloud",
   group: pluginGroups.tencent.key,
   desc: "修改TKE集群密钥配置，支持Opaque和TLS证书类型。注意：\n1. serverless集群请使用K8S部署插件；\n2. Opaque类型需要【上传到腾讯云】作为前置任务；\n3. ApiServer需要开通公网访问（或者certd可访问），实际上底层仍然是通过KubeClient进行部署",
+  dependPlugins: {
+    "access:tencent": "*",
+  },
   default: {
     strategy: {
-      runStrategy: RunStrategy.SkipWhenSucceed
-    }
-  }
+      runStrategy: RunStrategy.SkipWhenSucceed,
+    },
+  },
 })
 export class DeployCertToTencentTKEIngressPlugin extends AbstractTaskPlugin {
-
   @TaskInput({
     title: "ingress证书类型",
     component: {
@@ -26,11 +28,11 @@ export class DeployCertToTencentTKEIngressPlugin extends AbstractTaskPlugin {
       vModel: "value",
       options: [
         { value: "nginx", label: "TLS证书格式（Nginx可用）" },
-        { value: "qcloud",label: "Opaque格式（CLB可用，原qcloud）"}
-      ]
+        { value: "qcloud", label: "Opaque格式（CLB可用，原qcloud）" },
+      ],
     },
     helper: "clb将部署Opaque类型的证书，nginx类型将部署TLS证书格式",
-    required: true
+    required: true,
   })
   ingressClass!: string;
 
@@ -39,7 +41,7 @@ export class DeployCertToTencentTKEIngressPlugin extends AbstractTaskPlugin {
     helper: "请选择“上传证书到腾讯云”前置任务的输出",
     component: {
       name: "output-selector",
-      from: "UploadCertToTencent"
+      from: "UploadCertToTencent",
     },
     mergeScript: `
       return {
@@ -48,17 +50,16 @@ export class DeployCertToTencentTKEIngressPlugin extends AbstractTaskPlugin {
         })
       }
     `,
-    required: true
+    required: true,
   })
   tencentCertId!: string;
-
 
   @TaskInput({
     title: "域名证书",
     helper: "请选择前置任务输出的域名证书",
     component: {
       name: "output-selector",
-      from: [...CertApplyPluginNames]
+      from: [...CertApplyPluginNames],
     },
     mergeScript: `
       return {
@@ -67,12 +68,9 @@ export class DeployCertToTencentTKEIngressPlugin extends AbstractTaskPlugin {
         })
       }
     `,
-    required: true
+    required: true,
   })
   cert!: any;
-
-
-
 
   /**
    * AccessProvider的key,或者一个包含access的具体的对象
@@ -82,13 +80,11 @@ export class DeployCertToTencentTKEIngressPlugin extends AbstractTaskPlugin {
     helper: "access授权",
     component: {
       name: "access-selector",
-      type: "tencent"
+      type: "tencent",
     },
-    required: true
+    required: true,
   })
   accessId!: string;
-
-
 
   @TaskInput({ title: "大区", value: "ap-guangzhou", required: true })
   region!: string;
@@ -97,7 +93,7 @@ export class DeployCertToTencentTKEIngressPlugin extends AbstractTaskPlugin {
     title: "集群ID",
     required: true,
     desc: "例如：cls-6lbj1vee",
-    request: true
+    request: true,
   })
   clusterId!: string;
 
@@ -112,8 +108,8 @@ export class DeployCertToTencentTKEIngressPlugin extends AbstractTaskPlugin {
       name: "a-select",
       vModel: "value",
       mode: "tags",
-      open: false
-    }
+      open: false,
+    },
   })
   secretName!: string | string[];
 
@@ -121,11 +117,10 @@ export class DeployCertToTencentTKEIngressPlugin extends AbstractTaskPlugin {
     title: "集群域名",
     helper: "ApiServer需要开通公网访问，填写`ApiServer公网IP:443`\n默认为:[clusterId].ccs.tencent-cloud.com，可能访问不通",
     component: {
-      placeholder: "xx.xxx.xx.xx:443"
-    }
+      placeholder: "xx.xxx.xx.xx:443",
+    },
   })
   clusterDomain!: string;
-
 
   @TaskInput({
     title: "ingress名称",
@@ -135,11 +130,10 @@ export class DeployCertToTencentTKEIngressPlugin extends AbstractTaskPlugin {
       name: "a-select",
       vModel: "value",
       mode: "tags",
-      open: false
-    }
+      open: false,
+    },
   })
   ingressName!: string | string[];
-
 
   @TaskInput({
     title: "忽略证书校验",
@@ -148,9 +142,9 @@ export class DeployCertToTencentTKEIngressPlugin extends AbstractTaskPlugin {
     component: {
       name: "a-switch",
       vModel: "checked",
-    }
+    },
   })
-  skipTLSVerify!:boolean
+  skipTLSVerify!: boolean;
 
   @TaskInput({
     title: "Secret自动创建",
@@ -163,10 +157,8 @@ export class DeployCertToTencentTKEIngressPlugin extends AbstractTaskPlugin {
   })
   createOnNotFound: boolean;
 
-
   // @TaskInput({ title: "集群内网ip", helper: "如果开启了外网的话，无需设置" })
   // clusterIp!: string;
-
 
   K8sClient: any;
 
@@ -180,7 +172,6 @@ export class DeployCertToTencentTKEIngressPlugin extends AbstractTaskPlugin {
     const accessProvider = await this.getAccess(this.accessId);
     const tkeClient = await this.getTkeClient(accessProvider, this.region);
     let kubeConfigStr = await this.getTkeKubeConfig(tkeClient, this.clusterId);
-
 
     if (this.clusterDomain) {
       const kubeConfig = yaml.load(kubeConfigStr);
@@ -212,23 +203,22 @@ export class DeployCertToTencentTKEIngressPlugin extends AbstractTaskPlugin {
       this.logger.info("正在重启ingress:", this.ingressName);
       await this.restartIngress({ k8sClient });
     }
-
   }
 
   async getTkeClient(accessProvider: any, region = "ap-guangzhou") {
-    const sdk = await import("tencentcloud-sdk-nodejs/tencentcloud/services/tke/v20180525/index.js");
+    const sdk = await this.importRuntime("tencentcloud-sdk-nodejs/tencentcloud/services/tke/v20180525/index.js");
     const TkeClient = sdk.v20180525.Client;
     const clientConfig = {
       credential: {
         secretId: accessProvider.secretId,
-        secretKey: accessProvider.secretKey
+        secretKey: accessProvider.secretKey,
       },
       region,
       profile: {
         httpProfile: {
-          endpoint: `tke.${accessProvider.intlDomain()}tencentcloudapi.com`
-        }
-      }
+          endpoint: `tke.${accessProvider.intlDomain()}tencentcloudapi.com`,
+        },
+      },
     };
 
     return new TkeClient(clientConfig);
@@ -237,7 +227,7 @@ export class DeployCertToTencentTKEIngressPlugin extends AbstractTaskPlugin {
   async getTkeKubeConfig(client: any, clusterId: string) {
     // Depends on tencentcloud-sdk-nodejs version 4.0.3 or higher
     const params = {
-      ClusterId: clusterId
+      ClusterId: clusterId,
     };
     const ret = await client.DescribeClusterKubeconfig(params);
     this.checkRet(ret);
@@ -256,13 +246,13 @@ export class DeployCertToTencentTKEIngressPlugin extends AbstractTaskPlugin {
 
     const body = {
       data: {
-        qcloud_cert_id: certIdBase64
+        qcloud_cert_id: certIdBase64,
       },
       metadata: {
         labels: {
-          certd: this.appendTimeSuffix("certd")
-        }
-      }
+          certd: this.appendTimeSuffix("certd"),
+        },
+      },
     };
     let secretNames: any = secretName;
     if (typeof secretName === "string") {
@@ -272,7 +262,7 @@ export class DeployCertToTencentTKEIngressPlugin extends AbstractTaskPlugin {
       await options.k8sClient.patchSecret({
         namespace,
         secretName: secret,
-        body
+        body,
       });
       this.logger.info(`CertSecret已更新:${secret}`);
     }
@@ -291,20 +281,20 @@ export class DeployCertToTencentTKEIngressPlugin extends AbstractTaskPlugin {
     const body = {
       data: {
         "tls.crt": crtBase64,
-        "tls.key": keyBase64
+        "tls.key": keyBase64,
       },
       metadata: {
         labels: {
-          certd: this.appendTimeSuffix("certd")
-        }
-      }
+          certd: this.appendTimeSuffix("certd"),
+        },
+      },
     };
     let secretNames = secretName;
     if (typeof secretName === "string") {
       secretNames = [secretName];
     }
     for (const secret of secretNames) {
-      await k8sClient.patchSecret({ namespace, secretName: secret, body , createOnNotFound: this.createOnNotFound});
+      await k8sClient.patchSecret({ namespace, secretName: secret, body, createOnNotFound: this.createOnNotFound });
       this.logger.info(`CertSecret已更新:${secret}`);
     }
   }
@@ -316,9 +306,9 @@ export class DeployCertToTencentTKEIngressPlugin extends AbstractTaskPlugin {
     const body = {
       metadata: {
         labels: {
-          certd: this.appendTimeSuffix("certd")
-        }
-      }
+          certd: this.appendTimeSuffix("certd"),
+        },
+      },
     };
     let ingressNames = this.ingressName || [];
     if (typeof ingressName === "string") {
@@ -335,5 +325,4 @@ export class DeployCertToTencentTKEIngressPlugin extends AbstractTaskPlugin {
       throw new Error("执行失败：" + ret.Error.Code + "," + ret.Error.Message);
     }
   }
-
 }

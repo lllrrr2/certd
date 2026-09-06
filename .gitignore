@@ -1,4 +1,4 @@
-./packages/core/lego
+﻿./packages/core/lego
 # IntelliJ project files
 node_modules/
 npm-debug.log
@@ -32,3 +32,14 @@ test/**/*.js
 test.js
 .history
 /logs
+.pnpm-lock.yaml
+pnpm-lock.yaml
+.studio/
+
+# Certd 推广报告，仅本地使用
+/popularize/reports/
+output/
+.uploads/
+.certd-plugin-history/
+.tmp
+.plugin-dev/

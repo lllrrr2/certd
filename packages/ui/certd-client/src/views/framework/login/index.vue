@@ -1,3 +1,4 @@
+<!-- eslint-disable vue/multi-word-component-names -->
 <template>
   <div class="main login-page">
     <a-form v-if="!twoFactor.loginId" ref="formRef" class="user-layout-login" name="custom-validation" :model="formState" v-bind="layout" @finish="handleFinish" @finish-failed="handleFinishFailed">
@@ -108,6 +109,7 @@ import * as oauthApi from "../oauth/api";
 import { notification } from "ant-design-vue";
 import { request } from "/src/api/service";
 import * as UserApi from "/src/store/user/api.user";
+import { inviteUtils } from "/@/utils/util.invite";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -136,6 +138,7 @@ const formState = reactive({
   smsCode: "",
   captcha: null,
   smsCaptcha: null,
+  inviteCode: inviteUtils.get(),
 });
 
 const rules = {
@@ -220,7 +223,6 @@ const handleTwoFactorSubmit = async () => {
 };
 
 const sysPublicSettings = settingStore.getSysPublic;
-
 const hasRegisterTypeEnabled = () => {
   return sysPublicSettings.registerEnabled && (sysPublicSettings.usernameRegisterEnabled || sysPublicSettings.emailRegisterEnabled || sysPublicSettings.mobileRegisterEnabled || sysPublicSettings.smsLoginEnabled);
 };
@@ -262,7 +264,6 @@ onMounted(() => {});
     .input-right {
       width: 160px;
       margin-left: 10px;
-      background: #cfcfcf !important;
     }
 
     .forge-password {

@@ -2,8 +2,8 @@ import { AddonInput, BaseAddon, IsAddon } from "@certd/lib-server";
 import { BuildLoginUrlReq, BuildLogoutUrlReq, IOauthProvider, OnCallbackReq } from "../api.js";
 
 const CLOGIN_TYPES = [
-  { label: "QQ", value: "qq", icon: "cib:tencent-qq:#007AFF" },
-  { label: "微信", value: "wx", icon: "simple-icons:wechat:#34C759" },
+  { label: "QQ", value: "qq", icon: "svg:icon-qq" },
+  { label: "微信", value: "wx", icon: "svg:icon-wechat" },
   { label: "支付宝", value: "alipay", icon: "simple-icons:alipay:#0099ff" },
   { label: "微博", value: "sina", icon: "uiw:weibo:#FF3B30" },
   { label: "百度", value: "baidu", icon: "simple-icons:baidu:#007AFF" },
@@ -29,9 +29,9 @@ function getCloginType(subtype?: string, loginType?: string | string[]) {
 
 @IsAddon({
   addonType: "oauth",
-  name: 'clogin',
-  title: '彩虹聚合登录',
-  desc: '彩虹聚合登录',
+  name: "clogin",
+  title: "彩虹聚合登录",
+  desc: "彩虹聚合登录",
   icon: "emojione:rainbow",
   showTest: false,
 })
@@ -40,7 +40,7 @@ export class CloginOauthProvider extends BaseAddon implements IOauthProvider {
     title: "系统地址",
     helper: "http://clogin.xxxx.com/",
     required: true,
-    col:{span:24},
+    col: { span: 24 },
   })
   endpoint = "";
 
@@ -85,19 +85,17 @@ export class CloginOauthProvider extends BaseAddon implements IOauthProvider {
   })
   appKey = "";
 
-
   async buildLoginUrl(params: BuildLoginUrlReq) {
-
-    let redirectUri = params.redirectUri || ""
+    const redirectUri = params.redirectUri || "";
     const loginType = getCloginType(params.subtype, this.loginType);
     // if(redirectUri.indexOf("localhost:3008")>=0){
     //   redirectUri = redirectUri.replace("localhost:3008", "certd.handfree.work")
     // }
     const res = await this.ctx.http.request({
-      url: `${this.endpoint}/connect.php?act=login&appid=${this.appId}&appkey=${this.appKey}&type=${loginType}&redirect_uri=${redirectUri}&state=${params.state}`
-    })
+      url: `${this.endpoint}/connect.php?act=login&appid=${this.appId}&appkey=${this.appKey}&type=${loginType}&redirect_uri=${redirectUri}&state=${params.state}`,
+    });
 
-    this.checkRes(res)
+    this.checkRes(res);
 
     return {
       loginUrl: res.url,
@@ -107,23 +105,22 @@ export class CloginOauthProvider extends BaseAddon implements IOauthProvider {
 
   checkRes(res: any) {
     if (res.code !== 0) {
-      throw new Error(res.msg || "请求接口失败")
+      throw new Error(res.msg || "请求接口失败");
     }
   }
 
   async onCallback(req: OnCallbackReq) {
-
     //校验state
 
-    const code = req.code || ""
+    const code = req.code || "";
     const loginType = getCloginType(req.ticketValue?.subtype, this.loginType);
 
-    const tokenEndpoint = `${this.endpoint}/connect.php?act=callback&appid=${this.appId}&appkey=${this.appKey}&type=${loginType}&code=${code}`
+    const tokenEndpoint = `${this.endpoint}/connect.php?act=callback&appid=${this.appId}&appkey=${this.appKey}&type=${loginType}&code=${code}`;
     const res = await this.ctx.utils.http.request({
       url: tokenEndpoint,
       method: "post",
-    })
-    this.checkRes(res)
+    });
+    this.checkRes(res);
 
     /**
      *  "access_token": "89DC9691E274D6B596FFCB8D43368234",
@@ -135,8 +132,7 @@ export class CloginOauthProvider extends BaseAddon implements IOauthProvider {
   "ip": "1.12.3.40"
      */
 
-    const { access_token, faceimg, nickname, social_uid } = res
-
+    const { access_token, faceimg, nickname, social_uid } = res;
 
     return {
       token: {
@@ -149,8 +145,8 @@ export class CloginOauthProvider extends BaseAddon implements IOauthProvider {
         nickName: nickname || "",
         avatar: faceimg || "",
       },
-    }
-  };
+    };
+  }
 
   async buildLogoutUrl(params: BuildLogoutUrlReq) {
     return {};

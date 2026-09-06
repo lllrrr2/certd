@@ -14,13 +14,13 @@
 </template>
 
 <script lang="ts" setup>
-import { onActivated, onMounted } from "vue";
 import { useFs } from "@fast-crud/fast-crud";
-import createCrudOptions from "./crud";
-import { message, Modal } from "ant-design-vue";
+import { notification, Modal } from "ant-design-vue";
 import { DeleteBatch } from "./api";
-import { useI18n } from "/src/locales";
+import createCrudOptions from "./crud";
 import { useCrudPermission } from "/@/plugin/permission";
+import { useMounted } from "/@/use/use-mounted";
+import { useI18n } from "/src/locales";
 
 const { t } = useI18n();
 
@@ -43,22 +43,15 @@ const handleBatchDelete = () => {
       content: t("certd.confirmBatchDeleteContent", { count: selectedRowKeys.value.length }),
       async onOk() {
         await DeleteBatch(selectedRowKeys.value);
-        message.info(t("certd.deleteSuccess"));
+        notification.info({ message: t("certd.deleteSuccess") });
         crudExpose.doRefresh();
         selectedRowKeys.value = [];
       },
     });
   } else {
-    message.error(t("certd.pleaseSelectRecords"));
+    notification.error({ message: t("certd.pleaseSelectRecords") });
   }
 };
-
-// 页面打开后获取列表数据
-onMounted(() => {
-  crudExpose.doRefresh();
-});
-onActivated(() => {
-  crudExpose.doRefresh();
-});
+useMounted(() => crudExpose.doRefresh());
 </script>
 <style lang="less"></style>

@@ -56,7 +56,7 @@ input:
       action: onGetRegionList
       search: false
       pager: false
-      multi: true
+      single: false
       watches:
         - certDomains
         - accessId
@@ -78,14 +78,14 @@ input:
   groupId:
     title: API分组
     component:
-      name: remote-auto-complete
+      name: remote-select
       vModel: value
       mode: tags
       type: plugin
       action: onGetGroupList
-      search: false
-      pager: false
-      multi: true
+      search: true
+      pager: true
+      single: true
       watches:
         - certDomains
         - accessId
@@ -114,7 +114,7 @@ input:
       action: onGetDomainList
       search: false
       pager: false
-      multi: true
+      single: false
       watches:
         - certDomains
         - accessId

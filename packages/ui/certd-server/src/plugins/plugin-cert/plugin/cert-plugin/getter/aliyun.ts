@@ -28,47 +28,44 @@ export class CertApplyGetFormAliyunPlugin extends CertApplyBasePlugin {
   })
   accessId!: string;
 
-  @TaskInput(
-    {
-      title: "证书API 版本",
-      value: "v1",
-      component: {
-        name: "a-select",
-        vModel: "value",
-        options: [
-          {
-            label: "API 1.0 (旧版)",
-            value: "v1",
-          },
-          {
-            label: "API 2.0 (新版)",
-            value: "v2",
-          },
-        ],
-      },
-      helper: "选择阿里云证书 API 版本",
-    }
-  )
+  @TaskInput({
+    title: "证书API 版本",
+    value: "v1",
+    component: {
+      name: "a-select",
+      vModel: "value",
+      options: [
+        {
+          label: "API 1.0 (旧版)",
+          value: "v1",
+        },
+        {
+          label: "API 2.0 (新版)",
+          value: "v2",
+        },
+      ],
+    },
+    helper: "选择阿里云证书 API 版本",
+  })
   apiVersion!: string;
-
 
   @TaskInput(
     createRemoteSelectInputDefine({
       title: "证书订单 ID",
-      helper: "订阅模式的证书订单 Id(在新建流水线时暂时无法获取，可以先随便填个数字，先创建，进入流水线编辑页面再获取选择即可)",
+      helper: "订阅模式的证书订单 Id",
       typeName: "CertApplyGetFormAliyun",
-      pageSize: 50,
       component: {
         name: "RemoteSelect",
         vModel: "value",
         pager: true,
+        single: true,
       },
       action: CertApplyGetFormAliyunPlugin.prototype.onGetOrderList.name,
     })
   )
   orderId!: string;
 
-  async onInit(): Promise<void> { }
+  async onInit(): Promise<void> {}
 
   async doCertApply(): Promise<CertReader> {
     const access = await this.getAccess<AliyunAccess>(this.accessId);
@@ -101,6 +98,9 @@ export class CertApplyGetFormAliyunPlugin extends CertApplyBasePlugin {
     this.logger.info(`开始获取证书 (API 2.0),instanceId:${this.orderId}`);
     if (!this.orderId) {
       throw new Error("请先输入证书实例 ID");
+    }
+    if (Array.isArray(this.orderId) && this.orderId.length > 0) {
+      this.orderId = this.orderId[0];
     }
     const certificateId = await this.getOrderDetailV2(client, this.orderId);
     this.logger.info(`获取到证书 ID:${certificateId}`);
@@ -214,7 +214,10 @@ export class CertApplyGetFormAliyunPlugin extends CertApplyBasePlugin {
     });
     const list = res?.CertificateOrderList || [];
     if (!list || list.length === 0) {
-      return [];
+      return {
+        list: [],
+        total: 0,
+      };
     }
 
     const total = res.TotalCount || 0;
@@ -259,7 +262,10 @@ export class CertApplyGetFormAliyunPlugin extends CertApplyBasePlugin {
 
     const list = res?.InstanceList || [];
     if (!list || list.length === 0) {
-      return [];
+      return {
+        list: [],
+        total: 0,
+      };
     }
 
     const total = res.TotalCount || 0;

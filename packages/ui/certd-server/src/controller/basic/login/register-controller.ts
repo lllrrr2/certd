@@ -1,8 +1,10 @@
-import { ALL, Body, Controller, Inject, Post, Provide, RequestIP } from '@midwayjs/core';
-import { BaseController, Constants, SysSettingsService } from '@certd/lib-server';
-import { RegisterType, UserService } from '../../../modules/sys/authority/service/user-service.js';
-import { CodeService } from '../../../modules/basic/service/code-service.js';
-import { checkComm, checkPlus } from '@certd/plus-core';
+import { ALL, Body, Controller, Inject, Post, Provide, RequestIP } from "@midwayjs/core";
+import { BaseController, Constants, SysSettingsService } from "@certd/lib-server";
+import { RegisterType } from "../../../modules/sys/authority/service/user-service.js";
+import { CodeService } from "../../../modules/basic/service/code-service.js";
+import { checkComm, checkPlus } from "@certd/plus-core";
+import { LoginService } from "../../../modules/login/service/login-service.js";
+import { AuditType } from "../../../modules/sys/enterprise/service/audit-constants.js";
 
 export type RegisterReq = {
   type: RegisterType;
@@ -13,23 +15,28 @@ export type RegisterReq = {
   phoneCode?: string;
 
   validateCode: string;
-  captcha:any;
+  captcha: any;
+  inviteCode?: string;
 };
 
 /**
  */
 @Provide()
-@Controller('/api/')
+@Controller("/api/")
 export class RegisterController extends BaseController {
   @Inject()
-  userService: UserService;
+  loginService: LoginService;
   @Inject()
   codeService: CodeService;
 
   @Inject()
   sysSettingsService: SysSettingsService;
 
-  @Post('/register', { description: Constants.per.guest })
+  getAuditType(): string {
+    return AuditType.login.value;
+  }
+
+  @Post("/register", { description: Constants.per.guest, summary: "用户注册" })
   public async register(
     @Body(ALL)
     body: RegisterReq,
@@ -37,30 +44,32 @@ export class RegisterController extends BaseController {
   ) {
     const sysPublicSettings = await this.sysSettingsService.getPublicSettings();
     if (sysPublicSettings.registerEnabled === false) {
-      throw new Error('当前站点已禁止自助注册功能');
+      throw new Error("当前站点已禁止自助注册功能");
     }
 
-    if (body.username && ["admin","certd"].includes(body.username) ) {
-      throw new Error('用户名不能为保留字');
+    if (body.username && ["admin", "certd"].includes(body.username)) {
+      throw new Error("用户名不能为保留字");
     }
 
-    if (body.type === 'username') {
+    if (body.type === "username") {
       if (sysPublicSettings.usernameRegisterEnabled === false) {
-        throw new Error('当前站点已禁止用户名注册功能');
+        throw new Error("当前站点已禁止用户名注册功能");
       }
       if (!body.username) {
-        throw new Error('用户名不能为空');
+        throw new Error("用户名不能为空");
       }
 
-      await this.codeService.checkCaptcha(body.captcha,{remoteIp});
-      const newUser = await this.userService.register(body.type, {
+      await this.codeService.checkCaptcha(body.captcha, { remoteIp });
+      const registerUser = {
         username: body.username,
         password: body.password,
-      } as any);
+      } as any;
+      const newUser = await this.loginService.register(body.type, registerUser, body.inviteCode);
+      this.auditLog({ userId: newUser.id, username: body.username, content: `用户「${body.username}」注册成功` });
       return this.ok(newUser);
-    } else if (body.type === 'mobile') {
+    } else if (body.type === "mobile") {
       if (sysPublicSettings.mobileRegisterEnabled === false) {
-        throw new Error('当前站点已禁止手机号注册功能');
+        throw new Error("当前站点已禁止手机号注册功能");
       }
       checkComm();
       //验证短信验证码
@@ -70,16 +79,18 @@ export class RegisterController extends BaseController {
         smsCode: body.validateCode,
         throwError: true,
       });
-      const newUser = await this.userService.register(body.type, {
+      const registerUser = {
         username: body.username,
         phoneCode: body.phoneCode,
         mobile: body.mobile,
         password: body.password,
-      } as any);
+      } as any;
+      const newUser = await this.loginService.register(body.type, registerUser, body.inviteCode);
+      this.auditLog({ userId: newUser.id, username: body.mobile, content: `用户「${body.mobile}」注册成功` });
       return this.ok(newUser);
-    } else if (body.type === 'email') {
+    } else if (body.type === "email") {
       if (sysPublicSettings.emailRegisterEnabled === false) {
-        throw new Error('当前站点已禁止Email注册功能');
+        throw new Error("当前站点已禁止Email注册功能");
       }
       checkPlus();
       this.codeService.checkEmailCode({
@@ -87,11 +98,13 @@ export class RegisterController extends BaseController {
         validateCode: body.validateCode,
         throwError: true,
       });
-      const newUser = await this.userService.register(body.type, {
+      const registerUser = {
         username: body.username,
         email: body.email,
         password: body.password,
-      } as any);
+      } as any;
+      const newUser = await this.loginService.register(body.type, registerUser, body.inviteCode);
+      this.auditLog({ userId: newUser.id, username: body.email, content: `用户「${body.email}」注册成功` });
       return this.ok(newUser);
     }
   }

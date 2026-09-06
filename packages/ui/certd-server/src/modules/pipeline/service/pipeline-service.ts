@@ -1,32 +1,10 @@
 import { Config, Inject, Provide, Scope, ScopeEnum, sleep } from "@midwayjs/core";
 import { InjectEntityModel } from "@midwayjs/typeorm";
 import { In, MoreThan, Repository } from "typeorm";
-import {
-  AccessService,
-  BaseService,
-  isEnterprise,
-  NeedSuiteException,
-  NeedVIPException,
-  PageReq,
-  SysPublicSettings,
-  SysSettingsService,
-  SysSiteInfo
-} from "@certd/lib-server";
+import { AccessService, BaseService, isEnterprise, NeedSuiteException, NeedVIPException, PageReq, SysPublicSettings, SysSettingsService, SysSiteInfo, ValidateException } from "@certd/lib-server";
 import { PipelineEntity } from "../entity/pipeline.js";
 import { PipelineDetail } from "../entity/vo/pipeline-detail.js";
-import {
-  Executor,
-  IAccessService,
-  ICnameProxyService,
-  INotificationService, Notification,
-  Pipeline,
-  pluginRegistry,
-  ResultType,
-  RunHistory,
-  RunnableCollection,
-  SysInfo,
-  UserInfo
-} from "@certd/pipeline";
+import { Executor, IAccessService, ICnameProxyService, INotificationService, Notification, Pipeline, pluginRegistry, ResultType, RunHistory, RunnableCollection, SysInfo, UserInfo } from "@certd/pipeline";
 import { DbStorage } from "./db-storage.js";
 import { StorageService } from "./storage-service.js";
 import { Cron } from "../../cron/cron.js";
@@ -45,17 +23,18 @@ import { logger, utils } from "@certd/basic";
 import { UrlService } from "./url-service.js";
 import { NotificationService } from "./notification-service.js";
 import { UserSuiteEntity, UserSuiteService } from "@certd/commercial-core";
-import { CertInfoService } from "../../monitor/service/cert-info-service.js";
+import { ApplyTaskInfo, CertInfoService } from "../../monitor/service/cert-info-service.js";
 import { TaskServiceBuilder } from "./getter/task-service-getter.js";
 import { nanoid } from "nanoid";
-import { set } from "lodash-es";
+import { cloneDeep, set } from "lodash-es";
 import { executorQueue } from "@certd/lib-server";
 import parser from "cron-parser";
 import { ProjectService } from "../../sys/enterprise/service/project-service.js";
 import { CertApplyStepInputPatch, updateCertApplyStepInputs } from "./pipeline-batch-update.js";
 import { calcNextSuiteCountUsed } from "./pipeline-suite-limit.js";
+import { CertApplyTemplateParams } from "../../cert/service/cert-apply-template-fields.js";
+import { UserSettingsService } from "../../mine/service/user-settings-service.js";
 const runningTasks: Map<string | number, Executor> = new Map();
-
 
 /**
  * 证书申请
@@ -112,6 +91,8 @@ export class PipelineService extends BaseService<PipelineEntity> {
 
   @Inject()
   projectService: ProjectService;
+  @Inject()
+  userSettingsService: UserSettingsService;
 
   //@ts-ignore
   getRepository() {
@@ -154,9 +135,9 @@ export class PipelineService extends BaseService<PipelineEntity> {
 
       //获取下次执行时间
       if (pipeline.triggers?.length > 0) {
-        const triggers = pipeline.triggers.filter((item) => item.type === 'timer');
+        const triggers = pipeline.triggers.filter(item => item.type === "timer");
         if (triggers && triggers.length > 0) {
-          let nextTimes: any = [];
+          const nextTimes: any = [];
           for (const item of triggers) {
             if (!item.props?.cron) {
               continue;
@@ -164,9 +145,8 @@ export class PipelineService extends BaseService<PipelineEntity> {
             const ret = this.getCronNextTimes(item.props?.cron, 1);
             nextTimes.push(...ret);
           }
-          item.nextRunTime = nextTimes[0]
+          item.nextRunTime = nextTimes[0];
         }
-
       }
 
       delete item.content;
@@ -175,19 +155,23 @@ export class PipelineService extends BaseService<PipelineEntity> {
     return result;
   }
 
-  getCronNextTimes(cron: string, count: number = 1) {
+  getCronNextTimes(cron: string, count = 1) {
     if (cron == null) {
       return [];
     }
     const nextTimes = [];
-    const interval = parser.parseExpression(cron);
-    for (let i = 0; i < count; i++) {
-      const next = interval.next().getTime();
-      nextTimes.push(dayjs(next).format("YYYY-MM-DD HH:mm:ss"));
+    try {
+      const interval = parser.parseExpression(cron);
+      for (let i = 0; i < count; i++) {
+        const next = interval.next().getTime();
+        nextTimes.push(dayjs(next).format("YYYY-MM-DD HH:mm:ss"));
+      }
+    } catch (e) {
+      //历史数据中可能存在无效的cron表达式（例如2月31号），这里容错，避免流水线列表接口报错
+      logger.warn(`cron表达式解析失败：${cron}`, e);
     }
     return nextTimes;
   }
-
 
   private async fillLastVars(records: PipelineEntity[]) {
     const pipelineIds: number[] = [];
@@ -235,8 +219,6 @@ export class PipelineService extends BaseService<PipelineEntity> {
     }
   }
 
-
-
   /**
    * 获取详情
    * @param id
@@ -270,7 +252,6 @@ export class PipelineService extends BaseService<PipelineEntity> {
 
     const isUpdate = bean.id > 0 && old != null;
 
-
     const pipeline = JSON.parse(bean.content || "{}");
     RunnableCollection.initPipelineRunnableType(pipeline);
     pipeline.userId = bean.userId;
@@ -278,16 +259,25 @@ export class PipelineService extends BaseService<PipelineEntity> {
     if (bean.id) {
       pipeline.id = bean.id;
     }
-    let domains = [];
+    // 收集流水线中所有证书申请任务（CertApply 类步骤）：仓库按任务 id 维护 active 记录，保持一一对应
+    const applyTasks: ApplyTaskInfo[] = [];
     if (pipeline.stages) {
       RunnableCollection.each(pipeline.stages, (runnable: any) => {
         if (runnable.runnableType === "step" && runnable.type.indexOf("CertApply") >= 0) {
-          domains = runnable.input.domains || [];
+          applyTasks.push({
+            taskId: runnable.id,
+            domains: runnable.input.domains || [],
+          });
         }
       });
     }
+    // 流水线占用的全部域名（用于配额校验，多申请任务时汇总）
+    const allDomains: string[] = [];
+    for (const task of applyTasks) {
+      allDomains.push(...task.domains);
+    }
 
-    await this.checkMaxPipelineCount(bean, pipeline, domains, old);
+    await this.checkMaxPipelineCount(bean, pipeline, allDomains, old);
 
     if (!bean.status) {
       bean.status = ResultType.none;
@@ -301,7 +291,11 @@ export class PipelineService extends BaseService<PipelineEntity> {
     }
 
     await this.doUpdatePipelineJson(bean, pipeline);
-    //保存域名信息到certInfo表
+
+    // 保存域名信息到证书仓库：维护该流水线的“空证书记录”（占位记录，certInfo 为空）
+    // 【重要，不要删除】开放接口（OpenAPI autoApply）在触发申请证书前，会先查询证书仓库中是否有该流水线的记录：
+    // 有记录（即使证书内容为空）说明该流水线已存在、证书正在申请中，直接复用/触发已有流水线；
+    // 若没有这条空记录，证书申请成功前的空窗期内，开放接口每次调用都会重复创建新流水线。
     let fromType = "pipeline";
     if (bean.type === "cert_upload") {
       fromType = "upload";
@@ -310,7 +304,9 @@ export class PipelineService extends BaseService<PipelineEntity> {
     }
     const userId = bean.userId;
     const projectId = bean.projectId ?? null;
-    await this.certInfoService.updateDomains(pipeline.id, userId, projectId, domains, fromType);
+    // 同步证书仓库：每个申请任务一条 active 记录（没有则创建空占位），并删除流水线中已不存在任务的孤儿 active 记录
+    await this.certInfoService.updateDomains(pipeline.id, userId, projectId, applyTasks, fromType);
+
     return {
       ...bean,
       version: pipeline.version,
@@ -323,6 +319,8 @@ export class PipelineService extends BaseService<PipelineEntity> {
    * @param pipeline
    */
   async doUpdatePipelineJson(bean: PipelineEntity, pipeline: Pipeline) {
+    //保存前校验定时触发器cron表达式，避免无效表达式（例如2月31号）入库后导致流水线列表加载和定时任务注册报错
+    this.checkTriggers(pipeline);
     await this.unregisterTriggers(bean);
     if (pipeline.title) {
       bean.title = pipeline.title;
@@ -334,12 +332,43 @@ export class PipelineService extends BaseService<PipelineEntity> {
     }
     pipeline.version++;
 
-    bean.triggerCount = pipeline.triggers?.filter((trigger) => trigger.type === "timer").length || 0;
+    bean.triggerCount = pipeline.triggers?.filter(trigger => trigger.type === "timer").length || 0;
 
     bean.content = JSON.stringify(pipeline);
     await this.addOrUpdate(bean);
     await this.registerTrigger(bean);
-    return bean
+    return bean;
+  }
+
+  /**
+   * 校验流水线中所有定时触发器（timer）的cron表达式是否有效
+   * cron-parser无法解析的表达式（例如2月31号）会导致流水线列表加载和定时任务注册报错，保存前必须拦截
+   */
+  private checkTriggers(pipeline: Pipeline) {
+    if (pipeline.triggers == null) {
+      return;
+    }
+    for (const trigger of pipeline.triggers) {
+      if (trigger.type !== "timer") {
+        continue;
+      }
+      const cron = trigger.props?.cron;
+      if (cron == null || cron.trim() === "") {
+        continue;
+      }
+      this.checkCronExpression(cron);
+    }
+  }
+
+  /**
+   * 校验单个cron表达式是否可被cron-parser解析，不可解析时抛出友好错误
+   */
+  private checkCronExpression(cron: string) {
+    try {
+      parser.parseExpression(cron.trim());
+    } catch (e) {
+      throw new ValidateException(`定时触发cron表达式无效：${cron.trim()}，请检查日期是否正确（例如2月没有31号）`);
+    }
   }
 
   private async checkMaxPipelineCount(bean: PipelineEntity, pipeline: Pipeline, domains: string[], old?: PipelineEntity) {
@@ -351,7 +380,7 @@ export class PipelineService extends BaseService<PipelineEntity> {
     // }
     if (isEnterprise()) {
       //企业模式不限制
-      checkPlus()
+      checkPlus();
       return;
     }
 
@@ -363,7 +392,6 @@ export class PipelineService extends BaseService<PipelineEntity> {
         if (!old && userSuite?.pipelineCount.max != -1 && userSuite?.pipelineCount.used + 1 > userSuite?.pipelineCount.max) {
           throw new NeedSuiteException(`对不起，您最多只能创建${userSuite?.pipelineCount.max}条流水线，请购买或升级套餐`);
         }
-
         let oldDomainCount = 0;
         let oldWildcardDomainCount = 0;
         if (old?.id) {
@@ -398,18 +426,17 @@ export class PipelineService extends BaseService<PipelineEntity> {
         }
       }
     }
-
   }
 
   async foreachPipeline(callback: (pipeline: PipelineEntity) => void) {
     const idEntityList = await this.repository.find({
       select: {
-        id: true
+        id: true,
       },
       where: {
         disabled: false,
-        isTemplate: false
-      }
+        isTemplate: false,
+      },
     });
     const ids = idEntityList.map(item => {
       return item.id;
@@ -429,7 +456,7 @@ export class PipelineService extends BaseService<PipelineEntity> {
     //分段加载记录
     for (const idArr of idsSpan) {
       const list = await this.repository.findBy({
-        id: In(idArr)
+        id: In(idArr),
       });
 
       for (const entity of list) {
@@ -479,29 +506,21 @@ export class PipelineService extends BaseService<PipelineEntity> {
       } catch (e) {
         logger.error(e);
       }
-
     }
   }
 
-
-
-  async trigger(id: any, stepId?: string, doCheck = false) {
+  async trigger(id: any, stepId?: string) {
     const entity: PipelineEntity = await this.info(id);
-    if (doCheck) {
-      await this.beforeCheck(entity);
-    }
-    this.cron.register({
-      name: `pipeline.${id}.trigger.once`,
-      cron: null,
-      job: async () => {
-        logger.info("用户手动启动job");
-        try {
-          await this.doRun(entity, null, stepId);
-        } catch (e) {
-          logger.error("手动job执行失败：", e);
-        }
-      }
-    });
+    // this.cron.register({
+    //   name: `pipeline.${id}.trigger.once`,
+    //   cron: null,
+    //   job: async () => {
+
+    //   },
+    // });
+
+    logger.info("用户手动启动job");
+    return await this.doRun(entity, null, stepId, false);
   }
 
   async checkHasDeployCount(pipelineId: number, userId: number) {
@@ -512,7 +531,7 @@ export class PipelineService extends BaseService<PipelineEntity> {
         logger.error(e.message);
         await this.update({
           id: pipelineId,
-          status: "no_deploy_count"
+          status: "no_deploy_count",
         });
       }
       throw e;
@@ -576,6 +595,13 @@ export class PipelineService extends BaseService<PipelineEntity> {
     if (cron.startsWith("* ")) {
       cron = "0 " + cron.substring(2);
     }
+    //校验cron表达式有效性，无效（例如2月31号）时跳过注册，避免保存或启动时抛异常
+    try {
+      parser.parseExpression(cron);
+    } catch (e) {
+      logger.warn(`cron表达式无效，跳过定时任务注册：${cron}`, e);
+      return;
+    }
     const triggerId = trigger.id;
     const name = this.buildCronKey(pipelineId, triggerId);
     this.cron.remove(name);
@@ -596,22 +622,21 @@ export class PipelineService extends BaseService<PipelineEntity> {
             } catch (e) {
               logger.error("定时job执行失败：", e);
             }
-          }
+          },
         });
-      }
+      },
     });
     logger.info("当前定时器数量：", this.cron.getTaskSize());
   }
-
 
   async isPipelineValidTimeEnabled(entity: PipelineEntity) {
     const settings = await this.sysSettingsService.getPublicSettings();
     if (isPlus() && settings.pipelineValidTimeEnabled) {
       if (entity.validTime > 0 && entity.validTime < Date.now()) {
-        return false
+        return false;
       }
     }
-    return true
+    return true;
   }
 
   /**
@@ -630,13 +655,12 @@ export class PipelineService extends BaseService<PipelineEntity> {
   }
 
   async beforeCheck(entity: PipelineEntity) {
-
     if (isEnterprise()) {
-      checkPlus()
-      return {}
+      checkPlus();
+      return {};
     }
 
-    const validTimeEnabled = await this.isPipelineValidTimeEnabled(entity)
+    const validTimeEnabled = await this.isPipelineValidTimeEnabled(entity);
     if (!validTimeEnabled) {
       throw new Error(`流水线${entity.id}已过期，不予执行`);
     }
@@ -648,18 +672,18 @@ export class PipelineService extends BaseService<PipelineEntity> {
     await this.checkUserStatus(entity.userId);
 
     return {
-      suite
-    }
+      suite,
+    };
   }
 
-  async doRun(entity: PipelineEntity, triggerId: string, stepId?: string) {
-
-    let suite: any = null
+  async doRun(entity: PipelineEntity, triggerId: string, stepId?: string, wait = true) {
+    let suite: any = null;
     try {
       const res = await this.beforeCheck(entity);
-      suite = res.suite
+      suite = res.suite;
     } catch (e) {
       logger.error(`流水线${entity.id}触发失败（${triggerId}）：${e.message}`);
+      return;
     }
 
     const id = entity.id;
@@ -668,7 +692,7 @@ export class PipelineService extends BaseService<PipelineEntity> {
       pipeline.id = id;
     }
 
-    if(entity.userId !=null){
+    if (entity.userId != null) {
       pipeline.userId = entity.userId;
       pipeline.projectId = entity.projectId;
     }
@@ -688,7 +712,7 @@ export class PipelineService extends BaseService<PipelineEntity> {
         return;
       }
     }
-  
+
     const doSaveHistory = async (history: RunHistory) => {
       //保存执行历史
       try {
@@ -707,8 +731,8 @@ export class PipelineService extends BaseService<PipelineEntity> {
     class HistorySaver {
       latest: RunHistory = null;
       interval: any = null;
-      started: boolean = false;
-      async save(){
+      started = false;
+      async save() {
         const latest = this.latest;
         this.latest = null;
         if (latest == null) {
@@ -716,43 +740,43 @@ export class PipelineService extends BaseService<PipelineEntity> {
         }
         await doSaveHistory(latest);
       }
-      async start(){
-        this.started = true
+      async start() {
+        this.started = true;
         //先存一次，确保有数据
         await this.save();
-        setTimeout(()=>{
+        setTimeout(() => {
           //2秒后保存一次，尽快显示第一个任务的状态
-           this.save();
+          this.save();
         }, 1000 * 2);
-        this.interval = setInterval(()=>{
+        this.interval = setInterval(() => {
           //之后每5秒保存一次
           this.save();
         }, 1000 * 5);
       }
-      async push(history: RunHistory){
+      async push(history: RunHistory) {
         this.latest = history;
-        if(!this.started){
-         await this.start();
+        if (!this.started) {
+          await this.start();
         }
       }
-      async done(){
+      async done() {
         clearInterval(this.interval);
         await this.save();
       }
     }
 
     const historySaver = new HistorySaver();
-    const onChanged = async (history: RunHistory)=>{
+    const onChanged = async (history: RunHistory) => {
       await historySaver.push(history);
-    }
-    const onFinished = async (history: RunHistory)=>{
+    };
+    const onFinished = async (history: RunHistory) => {
       await onChanged(history);
       await historySaver.done();
-    }
+    };
 
     const userId = entity.userId;
     const projectId = entity.projectId;
-    let userIsAdmin = false
+    let userIsAdmin = false;
 
     if (projectId && projectId > 0) {
       userIsAdmin = await this.projectService.isAdmin(projectId);
@@ -761,10 +785,11 @@ export class PipelineService extends BaseService<PipelineEntity> {
     }
     const user: UserInfo = {
       id: userId,
-      role: userIsAdmin ? "admin" : "user"
+      role: userIsAdmin ? "admin" : "user",
     };
 
     const historyId = await this.historyService.start(entity, triggerType);
+    await this.userSettingsService.incrementStatistic(entity.userId, entity.projectId, "genCertCount.totalPipelineRuns");
     const sysInfo: SysInfo = {};
     if (isComm()) {
       const siteInfo = await this.sysSettingsService.getSetting<SysSiteInfo>(SysSiteInfo);
@@ -773,7 +798,7 @@ export class PipelineService extends BaseService<PipelineEntity> {
 
     const taskServiceGetter = this.taskServiceBuilder.create({
       userId,
-      projectId
+      projectId,
     });
     const accessGetter = await taskServiceGetter.get<IAccessService>("accessService");
     const notificationGetter = await taskServiceGetter.get<INotificationService>("notificationService");
@@ -792,29 +817,44 @@ export class PipelineService extends BaseService<PipelineEntity> {
       notificationService: notificationGetter,
       fileRootDir: this.certdConfig.fileRootDir,
       sysInfo,
-      serviceGetter: taskServiceGetter
+      serviceGetter: taskServiceGetter,
     });
-    try {
-      runningTasks.set(historyId, executor);
-      await executor.init();
-      if (stepId) {
-        // 清除该step的状态
-        executor.clearLastStatus(stepId);
-      }
-      const result = await executor.run(historyId, triggerType);
 
-      if (result === ResultType.success) {
-        if (isComm()) {
-          // 消耗成功次数
-          await this.userSuiteService.consumeDeployCount(suite, 1);
+    const run = async () => {
+      try {
+        runningTasks.set(historyId, executor);
+        await executor.init();
+        if (stepId) {
+          // 清除该step的状态
+          executor.clearLastStatus(stepId);
         }
+        const result = await executor.run(historyId, triggerType);
+
+        if (result === ResultType.success) {
+          if (isComm()) {
+            // 消耗成功次数
+            await this.userSuiteService.consumeDeployCount(suite, 1);
+          }
+        }
+      } catch (e) {
+        logger.error("执行失败：", e);
+        // throw e;
+      } finally {
+        runningTasks.delete(historyId);
       }
-    } catch (e) {
-      logger.error("执行失败：", e);
-      // throw e;
-    } finally {
-      runningTasks.delete(historyId);
+    };
+
+    if (wait) {
+      await run();
+    } else {
+      run();
     }
+
+    return {
+      pipelineId: pipeline.id,
+      triggerType,
+      historyId,
+    };
   }
 
   async cancel(historyId: number) {
@@ -875,13 +915,22 @@ export class PipelineService extends BaseService<PipelineEntity> {
       },
     });
     if (!pipelineEntity) {
-      return null
+      return null;
     }
     return pipelineEntity.projectId;
   }
+
+  async getUserProjectId(pipelineId: number) {
+    const pipelineEntity = await this.repository.findOne({
+      select: { userId: true, projectId: true },
+      where: { id: pipelineId },
+    });
+    return pipelineEntity ? { userId: pipelineEntity.userId, projectId: pipelineEntity.projectId } : null;
+  }
+
   private async saveHistory(history: RunHistory) {
     //修改pipeline状态
-    let pipelineEntity = new PipelineEntity();
+    const pipelineEntity = new PipelineEntity();
     pipelineEntity.id = parseInt(history.pipeline.id);
     pipelineEntity.status = history.pipeline.status.result + "";
     pipelineEntity.lastHistoryTime = history.pipeline.status.startTime;
@@ -909,44 +958,41 @@ export class PipelineService extends BaseService<PipelineEntity> {
     await this.historyLogService.addOrUpdate(logEntity);
   }
 
-  async count(param: { userId?: any, projectId?: number }) {
+  async count(param: { userId?: any; projectId?: number }) {
+    const query: any = {
+      userId: param.userId,
+      isTemplate: false,
+    };
+    if (param.projectId != null) {
+      query.projectId = param.projectId;
+    }
     const count = await this.repository.count({
-      where: {
-        userId: param.userId,
-        projectId: param.projectId,
-        isTemplate: false
-      }
+      where: query,
     });
     return count;
   }
 
-  async statusCount(param: { userId?: any, projectId?: number } = {}) {
-    const statusCount = await this.repository
-      .createQueryBuilder()
-      .select("status")
-      .addSelect("count(1)", "count")
-      .where({
-        userId: param.userId,
-        projectId: param.projectId,
-        isTemplate: false
-      })
-      .groupBy("status")
-      .getRawMany();
+  async statusCount(param: { userId?: any; projectId?: number } = {}) {
+    const query: any = {
+      userId: param.userId,
+      isTemplate: false,
+    };
+    if (param.projectId != null) {
+      query.projectId = param.projectId;
+    }
+    const statusCount = await this.repository.createQueryBuilder().select("status").addSelect("count(1)", "count").where(query).groupBy("status").getRawMany();
     return statusCount;
   }
 
-  async enableCount(param: { userId?: any, projectId?: number } = {}) {
-    const statusCount = await this.repository
-      .createQueryBuilder()
-      .select("disabled")
-      .addSelect("count(1)", "count")
-      .where({
-        userId: param.userId,
-        projectId: param.projectId,
-        isTemplate: false
-      })
-      .groupBy("disabled")
-      .getRawMany();
+  async enableCount(param: { userId?: any; projectId?: number } = {}) {
+    const query: any = {
+      userId: param.userId,
+      isTemplate: false,
+    };
+    if (param.projectId != null) {
+      query.projectId = param.projectId;
+    }
+    const statusCount = await this.repository.createQueryBuilder().select("disabled").addSelect("count(1)", "count").where(query).groupBy("disabled").getRawMany();
     const result = {
       enabled: 0,
       disabled: 0,
@@ -958,18 +1004,18 @@ export class PipelineService extends BaseService<PipelineEntity> {
   }
 
   async latestExpiringList({ userId, projectId }: any) {
+    const userProjectQuery = this.buildUserProjectQuery(userId, projectId);
     let list = await this.repository.find({
       select: {
         id: true,
         title: true,
-        status: true
+        status: true,
       },
       where: {
-        userId,
+        ...userProjectQuery,
         disabled: false,
-        projectId,
-        isTemplate: false
-      }
+        isTemplate: false,
+      },
     });
     await this.fillLastVars(list);
     list = list.filter(item => {
@@ -991,7 +1037,7 @@ export class PipelineService extends BaseService<PipelineEntity> {
       .where({
         // 0点
         createTime: MoreThan(todayEnd.add(-param.days, "day").toDate()),
-        isTemplate: false
+        isTemplate: false,
       })
       .groupBy("date")
       .getRawMany();
@@ -999,48 +1045,52 @@ export class PipelineService extends BaseService<PipelineEntity> {
     return result;
   }
 
-  async batchDelete(ids: number[], userId?: number, projectId?: number) {
+  async batchDelete(ids: number[], userId?: number, projectId?: number): Promise<number> {
     if (!isPlus()) {
       throw new NeedVIPException("此功能需要升级Certd专业版");
+    }
+    if (!ids || ids.length === 0) {
+      throw new ValidateException("ids不能为空");
+    }
+    ids = this.filterIds(ids);
+
+    if (userId && userId > 0) {
+      await this.checkUserId(ids, userId);
+    }
+    if (projectId) {
+      await this.checkUserId(ids, projectId, "projectId");
     }
     for (const id of ids) {
-      if (userId && userId > 0) {
-        await this.checkUserId(id, userId);
-      }
-      if (projectId) {
-        await this.checkUserId(id, projectId, "projectId")
-      }
       await this.delete(id);
     }
+    return ids.length;
   }
 
-  async batchUpdateGroup(ids: number[], groupId: number, userId: any, projectId?: number) {
+  async batchUpdateGroup(ids: number[], groupId: number, userId: any, projectId?: number): Promise<number> {
     if (!isPlus()) {
       throw new NeedVIPException("此功能需要升级Certd专业版");
     }
-    const query: any = {}
+    const query: any = {};
     if (userId && userId > 0) {
       query.userId = userId;
     }
     if (projectId) {
       query.projectId = projectId;
     }
-    await this.repository.update(
+    const result = await this.repository.update(
       {
         id: In(ids),
-        ...query
+        ...query,
       },
       { groupId }
     );
+    return result.affected || 0;
   }
-
-
-
 
   /**
    * 批量转移到其他项目
    */
-  async batchTransfer(ids: number[], projectId: number) {
+  async batchTransfer(ids: number[], projectId: number): Promise<number> {
     if (!isPlus()) {
       throw new NeedVIPException("此功能需要升级Certd专业版");
     }
@@ -1050,7 +1100,7 @@ export class PipelineService extends BaseService<PipelineEntity> {
     if (!projectId || projectId <= 0) {
       throw new Error("projectId不能为空");
     }
-    const userId = -1 // 强制为-1
+    const userId = -1; // 强制为-1
 
     async function eachSteps(pipeline, callback) {
       for (const stage of pipeline.stages) {
@@ -1061,7 +1111,6 @@ export class PipelineService extends BaseService<PipelineEntity> {
         }
       }
     }
-
 
     for (const id of ids) {
       const pipelineEntity = await this.info(id);
@@ -1080,16 +1129,16 @@ export class PipelineService extends BaseService<PipelineEntity> {
         userId: userId,
         projectId: projectId,
         groupId: null,
-      }
+      };
 
       const pipeline = JSON.parse(pipelineEntity.content);
       pipeline.userId = userId;
       pipeline.projectId = projectId;
 
       //转移和修改access 和 Notification
-      await eachSteps(pipeline, async (step) => {
+      await eachSteps(pipeline, async step => {
         const type = step.type;
-        //plugin 
+        //plugin
         const pluginDefine: any = pluginRegistry.getDefine(type);
         if (pluginDefine) {
           for (const key in step.input) {
@@ -1097,48 +1146,41 @@ export class PipelineService extends BaseService<PipelineEntity> {
             if (!value || value <= 0) {
               continue;
             }
-            if (!pluginDefine.input[key]){
+            if (!pluginDefine.input[key]) {
               continue;
             }
             const componentName = pluginDefine.input[key].component?.name;
             if (componentName === "access-selector" || componentName === "AccessSelector") {
               //这是一个授权ID属性，检查是否需要转移授权
-              const newAccessId = await this.accessService.copyTo(value,projectId);
+              const newAccessId = await this.accessService.copyTo(value, projectId);
               step.input[key] = newAccessId;
             }
           }
         }
-      })
-      pipeline.notifications = [
+      });
+      (pipeline.notifications = [
         {
-          "type": "custom",
-          "when": [
-            "error",
-            "turnToSuccess"
-          ],
-          "notificationId": 0,
-          "title": "使用默认通知",
-          "id": nanoid()
-        }
-      ],
-
-      entity.content = JSON.stringify(pipeline);
+          type: "custom",
+          when: ["error", "turnToSuccess"],
+          notificationId: 0,
+          title: "使用默认通知",
+          id: nanoid(),
+        },
+      ]),
+        (entity.content = JSON.stringify(pipeline));
       await this.unregisterTriggers(entity.id);
       await this.repository.save(entity);
-      await this.save(entity)
+      await this.save(entity);
     }
-
-
-
+    return ids.length;
   }
 
-
-  async batchUpdateTrigger(ids: number[], trigger: any, userId: any, projectId?: number) {
+  async batchUpdateTrigger(ids: number[], trigger: any, userId: any, projectId?: number): Promise<any> {
     if (!isPlus()) {
       throw new NeedVIPException("此功能需要升级Certd专业版");
     }
     //允许管理员修改，userId=null
-    const query: any = {}
+    const query: any = {};
     if (userId && userId > 0) {
       query.userId = userId;
     }
@@ -1148,50 +1190,53 @@ export class PipelineService extends BaseService<PipelineEntity> {
     const list = await this.find({
       where: {
         id: In(ids),
-        ...query
-      }
+        ...query,
+      },
     });
 
     for (const item of list) {
       const pipeline = JSON.parse(item.content);
       if (trigger.props === false) {
         //清除trigger
-        pipeline.triggers = []
+        pipeline.triggers = [];
       } else {
+        const start = dayjs().format("YYYY-MM-DD") + " " + trigger.randomRange[0];
+        let end = dayjs().format("YYYY-MM-DD") + " " + trigger.randomRange[1];
+        if (trigger.randomRange[1] < trigger.randomRange[0]) {
+          //跨天
+          end = dayjs().add(1, "day").format("YYYY-MM-DD") + " " + trigger.randomRange[1];
+        }
+        const startTime = dayjs(start).valueOf();
+        const endTime = dayjs(end).valueOf();
+
+        const triggerConf = cloneDeep(trigger);
         if (trigger.random === true) {
           //随机时间
-          const start = dayjs().format("YYYY-MM-DD") + " " + trigger.randomRange[0];
-          let end = dayjs().format("YYYY-MM-DD") + " " + trigger.randomRange[1];
-          if (trigger.randomRange[1] < trigger.randomRange[0]) {
-            //跨天
-            end = dayjs().add(1, "day").format("YYYY-MM-DD") + " " + trigger.randomRange[1];
-          }
-          const startTime = dayjs(start).valueOf();
-          const endTime = dayjs(end).valueOf();
           const randomTime = Math.floor(Math.random() * (endTime - startTime)) + startTime;
           const time = dayjs(randomTime).format(" ss:mm:HH").replaceAll(":", " ").replaceAll(" 0", " ").trim();
-          set(trigger, "props.cron", `${time} * * *`)
+          set(triggerConf, "props.cron", `${time} * * *`);
         }
-        delete trigger.random
-        delete trigger.randomRange;
-        pipeline.triggers = [{
-          id: nanoid(),
-          title: "定时触发",
-          ...trigger
-        }];
+        delete triggerConf.random;
+        delete triggerConf.randomRange;
+        pipeline.triggers = [
+          {
+            id: nanoid(),
+            title: "定时触发",
+            ...triggerConf,
+          },
+        ];
       }
-
       await this.doUpdatePipelineJson(item, pipeline);
     }
-
+    return list.length;
   }
 
-  async batchUpdateNotifications(ids: number[], notification: Notification, userId: any, projectId?: number) {
+  async batchUpdateNotifications(ids: number[], notification: Notification, userId: any, projectId?: number): Promise<number> {
     if (!isPlus()) {
       throw new NeedVIPException("此功能需要升级Certd专业版");
     }
     //允许管理员修改，userId=null
-    const query: any = {}
+    const query: any = {};
     if (userId && userId > 0) {
       query.userId = userId;
     }
@@ -1201,35 +1246,38 @@ export class PipelineService extends BaseService<PipelineEntity> {
     const list = await this.find({
       where: {
         id: In(ids),
-        ...query
-      }
+        ...query,
+      },
     });
 
     for (const item of list) {
       const pipeline = JSON.parse(item.content);
-      pipeline.notifications = [{
-        id: nanoid(),
-        title: "通知",
-        /**
-         * type: NotificationType;
-         *   when: NotificationWhen[];
-         *   options: EmailOptions;
-         *   notificationId: number;
-         *   title: string;
-         *   subType: string;
-         */
-        type: "other",
-        ...notification
-      }];
+      pipeline.notifications = [
+        {
+          id: nanoid(),
+          title: "通知",
+          /**
+           * type: NotificationType;
+           *   when: NotificationWhen[];
+           *   options: EmailOptions;
+           *   notificationId: number;
+           *   title: string;
+           *   subType: string;
+           */
+          type: "other",
+          ...notification,
+        },
+      ];
       await this.doUpdatePipelineJson(item, pipeline);
     }
+    return list.length;
   }
 
-  async batchUpdateCertApplyOptions(ids: number[], options: CertApplyStepInputPatch, userId: any, projectId?: number) {
+  async batchUpdateCertApplyOptions(ids: number[], options: CertApplyStepInputPatch, userId: any, projectId?: number): Promise<number> {
     if (!isPlus()) {
       throw new NeedVIPException("此功能需要升级Certd专业版");
     }
-    const query: any = {}
+    const query: any = {};
     if (userId && userId > 0) {
       query.userId = userId;
     }
@@ -1239,8 +1287,8 @@ export class PipelineService extends BaseService<PipelineEntity> {
     const list = await this.find({
       where: {
         id: In(ids),
-        ...query
-      }
+        ...query,
+      },
     });
 
     for (const item of list) {
@@ -1254,9 +1302,10 @@ export class PipelineService extends BaseService<PipelineEntity> {
       }
       await this.doUpdatePipelineJson(item, pipeline);
     }
+    return list.length;
   }
 
-  async batchRerun(ids: number[], force: boolean, userId: any, projectId?: number) {
+  async batchRerun(ids: number[], force: boolean, userId: any, projectId?: number): Promise<number> {
     if (!isPlus()) {
       throw new NeedVIPException("此功能需要升级Certd专业版");
     }
@@ -1267,21 +1316,22 @@ export class PipelineService extends BaseService<PipelineEntity> {
     const where: any = {
       id: In(ids),
       userId,
-    }
+    };
     if (projectId) {
-      where.projectId = projectId
+      where.projectId = projectId;
     }
     const list = await this.repository.find({
       select: {
-        id: true
+        id: true,
       },
-      where: where
+      where: where,
     });
 
     ids = list.map(item => item.id);
 
     //异步执行
     this.startBatchRerun(userId, ids, force);
+    return ids.length;
   }
 
   startBatchRerun(userId: number, ids: number[], force: boolean) {
@@ -1293,35 +1343,33 @@ export class PipelineService extends BaseService<PipelineEntity> {
           } else {
             await this.run(id, null);
           }
-        }
+        },
       });
     }
   }
-
 
   async getUserPipelineCount(userId) {
     return await this.repository.count({ where: { userId } });
   }
 
   async getSimplePipelines(pipelineIds: number[], userId?: number, projectId?: number) {
+    const userProjectQuery = this.buildUserProjectQuery(userId, projectId);
     return await this.repository.find({
       select: {
         id: true,
-        title: true
+        title: true,
       },
       where: {
         id: In(pipelineIds),
-        userId,
-        projectId
-      }
+        ...userProjectQuery,
+      },
     });
   }
-
 
   private async checkUserStatus(userId: number) {
     if (isEnterprise()) {
       //企业模式不检查用户状态，都允许运行流水线
-      return
+      return;
     }
     const userEntity = await this.userService.info(userId);
     if (userEntity == null) {
@@ -1344,12 +1392,19 @@ export class PipelineService extends BaseService<PipelineEntity> {
     }
   }
 
-  async createAutoPipeline(req: { domains: string[]; email: string; userId: number, projectId?: number, from: string }) {
+  async createAutoPipeline(req: { domains: string[]; userId: number; projectId?: number; from: string; applyParams?: CertApplyTemplateParams }) {
     const randomHour = Math.floor(Math.random() * 6);
     const randomMin = Math.floor(Math.random() * 60);
     const randomCron = `0 ${randomMin} ${randomHour} * * *`;
 
-    let pipeline: any = {
+    const applyParams: any = {
+      ...req.applyParams,
+      domains: req.domains,
+    };
+    if (!applyParams.challengeType) {
+      applyParams.challengeType = "auto";
+    }
+    const pipeline: any = {
       title: req.domains[0] + `证书自动申请【${req.from ?? "OpenAPI"}】`,
       runnableType: "pipeline",
       triggers: [
@@ -1359,8 +1414,8 @@ export class PipelineService extends BaseService<PipelineEntity> {
           props: {
             cron: randomCron,
           },
-          type: "timer"
-        }
+          type: "timer",
+        },
       ],
       notifications: [
         {
@@ -1369,7 +1424,7 @@ export class PipelineService extends BaseService<PipelineEntity> {
           when: ["error", "turnToSuccess", "success"],
           notificationId: 0,
           title: "默认通知",
-        }
+        },
       ],
       stages: [
         {
@@ -1389,30 +1444,28 @@ export class PipelineService extends BaseService<PipelineEntity> {
                   runnableType: "step",
                   input: {
                     renewDays: 20,
-                    domains: req.domains,
-                    email: req.email,
-                    "challengeType": "auto",
-                    "sslProvider": "letsencrypt",
-                    "privateKeyType": "rsa_2048",
-                    "certProfile": "classic",
-                    "preferredChain": "ISRG Root X1",
-                    "useProxy": false,
-                    "skipLocalVerify": false,
-                    "maxCheckRetryCount": 20,
-                    "waitDnsDiffuseTime": 30,
-                    "pfxArgs": "-macalg SHA1 -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES",
-                    "successNotify": true
+                    sslProvider: "letsencrypt",
+                    privateKeyType: "rsa_2048",
+                    certProfile: "classic",
+                    preferredChain: "ISRG Root X2",
+                    useProxy: false,
+                    skipLocalVerify: false,
+                    maxCheckRetryCount: 20,
+                    waitDnsDiffuseTime: 30,
+                    pfxArgs: "-macalg SHA1 -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES",
+                    successNotify: true,
+                    ...applyParams,
                   },
                   strategy: {
-                    runStrategy: 0 // 正常执行
+                    runStrategy: 0, // 正常执行
                   },
-                  type: "CertApply"
-                }
-              ]
-            }
-          ]
-        }
-      ]
+                  type: "CertApply",
+                },
+              ],
+            },
+          ],
+        },
+      ],
     };
 
     const bean = new PipelineEntity();
@@ -1421,35 +1474,34 @@ export class PipelineService extends BaseService<PipelineEntity> {
     bean.userId = req.userId;
     bean.status = "none";
     bean.type = "cert_auto";
-    bean.disabled = false
-    bean.keepHistoryCount = 30
-    bean.projectId = req.projectId
-    await this.save(bean)
-
+    bean.disabled = false;
+    bean.keepHistoryCount = 100;
+    bean.projectId = req.projectId;
+    await this.save(bean);
 
     return bean;
   }
 
   async getStatus(pipelineId: number) {
-    const res = await this.repository.findOne({
+    return await this.repository.findOne({
       select: {
-        status: true
+        status: true,
+        updateTime: true,
       },
       where: {
-        id: pipelineId
-      }
+        id: pipelineId,
+      },
     });
-    return res?.status;
   }
 
   async getPipelineUserId(pipelineId: number) {
     const res = await this.repository.findOne({
       select: {
-        userId: true
+        userId: true,
       },
       where: {
-        id: pipelineId
-      }
+        id: pipelineId,
+      },
     });
     return res?.userId;
   }
@@ -1474,9 +1526,9 @@ export class PipelineService extends BaseService<PipelineEntity> {
         content: true,
       },
       where: {
-        webhookKey
-      }
-    })
+        webhookKey,
+      },
+    });
     if (!pipelineEntity) {
       throw new Error("webhookKey不存在");
     }

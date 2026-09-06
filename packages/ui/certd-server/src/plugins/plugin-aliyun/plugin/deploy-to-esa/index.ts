@@ -1,9 +1,6 @@
 import { AbstractTaskPlugin, IsTaskPlugin, pluginGroups, RunStrategy, TaskInput } from "@certd/pipeline";
 import { CertApplyPluginNames, CertInfo, CertReader } from "@certd/plugin-cert";
-import {
-  createCertDomainGetterInputDefine,
-  createRemoteSelectInputDefine
-} from "@certd/plugin-lib";
+import { createCertDomainGetterInputDefine, createRemoteSelectInputDefine } from "@certd/plugin-lib";
 import { AliyunAccess } from "../../../plugin-lib/aliyun/access/index.js";
 import { AliyunSslClient, CasCertId } from "../../../plugin-lib/aliyun/lib/ssl-client.js";
 import { AliyunClientV2 } from "../../../plugin-lib/aliyun/lib/aliyun-client-v2.js";
@@ -14,13 +11,13 @@ import dayjs from "dayjs";
   title: "阿里云-部署至ESA",
   icon: "svg:icon-aliyun",
   group: pluginGroups.aliyun.key,
-  desc: "部署证书到阿里云ESA(边缘安全加速)，自动删除过期证书",
+  desc: "部署证书到阿里云ESA(边缘安全加速)，支持边缘证书和SaaS证书两种模式",
   needPlus: false,
   default: {
     strategy: {
-      runStrategy: RunStrategy.SkipWhenSucceed
-    }
-  }
+      runStrategy: RunStrategy.SkipWhenSucceed,
+    },
+  },
 })
 export class AliyunDeployCertToESA extends AbstractTaskPlugin {
   @TaskInput({
@@ -28,9 +25,9 @@ export class AliyunDeployCertToESA extends AbstractTaskPlugin {
     helper: "请选择证书申请任务输出的域名证书",
     component: {
       name: "output-selector",
-      from: [...CertApplyPluginNames, 'uploadCertToAliyun']
+      from: [...CertApplyPluginNames, "uploadCertToAliyun"],
     },
-    required: true
+    required: true,
   })
   cert!: CertInfo | CasCertId | number;
 
@@ -45,10 +42,10 @@ export class AliyunDeployCertToESA extends AbstractTaskPlugin {
       vModel: "value",
       options: [
         { value: "cn-hangzhou", label: "华东1（杭州）" },
-        { value: "ap-southeast-1", label: "新加坡" }
-      ]
+        { value: "ap-southeast-1", label: "新加坡" },
+      ],
     },
-    required: true
+    required: true,
   })
   regionId!: string;
 
@@ -60,50 +57,87 @@ export class AliyunDeployCertToESA extends AbstractTaskPlugin {
       name: "a-select",
       options: [
         { value: "cas.aliyuncs.com", label: "中国大陆" },
-        { value: "cas.ap-southeast-1.aliyuncs.com", label: "新加坡" }
+        { value: "cas.ap-southeast-1.aliyuncs.com", label: "新加坡" },
         // { value: "cas.eu-central-1.aliyuncs.com", label: "德国（法兰克福）" }
-      ]
+      ],
     },
-    required: true
+    required: true,
   })
   casEndpoint!: string;
-
 
   @TaskInput({
     title: "Access授权",
     helper: "阿里云授权AccessKeyId、AccessKeySecret",
     component: {
       name: "access-selector",
-      type: "aliyun"
+      type: "aliyun",
     },
-    required: true
+    required: true,
   })
   accessId!: string;
+
+  @TaskInput({
+    title: "部署模式",
+    value: "edge",
+    component: {
+      name: "a-radio-group",
+      vModel: "value",
+      options: [
+        { label: "边缘证书", value: "edge" },
+        { label: "SaaS证书", value: "saas" },
+      ],
+    },
+    helper: "边缘证书：将证书部署到站点的边缘节点；SaaS证书：将证书部署到站点的SaaS域名",
+    required: true,
+  })
+  deployMode!: "edge" | "saas";
 
   @TaskInput(
     createRemoteSelectInputDefine({
       title: "站点",
       helper: "请选择要部署证书的站点",
       action: AliyunDeployCertToESA.prototype.onGetSiteList.name,
-      watches: ["accessId", "regionId"]
+      watches: ["accessId", "regionId"],
     })
   )
   siteIds!: string[];
+
+  @TaskInput(
+    createRemoteSelectInputDefine({
+      title: "SaaS域名",
+      helper: "请选择要部署证书的SaaS域名（SaaS证书模式下必选）",
+      action: AliyunDeployCertToESA.prototype.onGetCustomHostnameList.name,
+      watches: ["siteIds", "accessId", "regionId"],
+      required: false,
+      mergeScript: `
+        return {
+          show: ctx.compute(({form})=>{
+            return form.deployMode === 'saas'
+          }),
+          component:{
+            form: ctx.compute(({form})=>{
+              return form
+            })
+          },
+        }
+      `,
+    })
+  )
+  saasDomainIds!: string[];
 
   @TaskInput({
     title: "免费证书数量限制",
     value: 2,
     component: {
       name: "a-input-number",
-      vModel: "value"
+      vModel: "value",
     },
     helper: "将检查证书数量限制，如果超限将删除最旧的那张证书",
-    required: true
+    required: true,
   })
-  certLimit: number = 2;
+  certLimit = 2;
 
-  async onInstance() {
-  }
+  async onInstance() {}
 
   async getAliyunCertId(access: AliyunAccess) {
     let certId: any = this.cert;
@@ -112,7 +146,7 @@ export class AliyunDeployCertToESA extends AbstractTaskPlugin {
       const sslClient = new AliyunSslClient({
         access,
         logger: this.logger,
-        endpoint: this.casEndpoint
+        endpoint: this.casEndpoint,
       });
 
       const certInfo = this.cert as CertInfo;
@@ -121,51 +155,57 @@ export class AliyunDeployCertToESA extends AbstractTaskPlugin {
         certId = casCert.certId;
         certName = casCert.certName;
       } else if (certInfo.crt) {
-        certName = this.buildCertName(CertReader.getMainDomain(certInfo.crt),"certd");
+        certName = this.buildCertName(CertReader.getMainDomain(certInfo.crt), "certd");
 
         const certIdRes = await sslClient.uploadCertificate({
           name: certName,
-          cert: certInfo
+          cert: certInfo,
         });
         certId = certIdRes.certId as any;
         this.logger.info("上传证书成功", certId, certName);
-      }else{
-        throw new Error('证书格式错误'+JSON.stringify(this.cert));
+      } else {
+        throw new Error("证书格式错误" + JSON.stringify(this.cert));
       }
     }
     return {
       certId,
-      certName
+      certName,
     };
   }
 
   async execute(): Promise<void> {
-    this.logger.info("开始部署证书到阿里云");
+    this.logger.info("开始部署证书到阿里云ESA");
     const access = await this.getAccess<AliyunAccess>(this.accessId);
 
     const client = await this.getClient(access);
 
     const { certId, certName } = await this.getAliyunCertId(access);
 
+    if (this.deployMode === "saas") {
+      await this.executeSaaS(client, certId, certName);
+    } else {
+      await this.executeEdge(client, certId, certName);
+    }
+  }
+
+  async executeEdge(client: AliyunClientV2, certId: number, certName: string) {
+    this.logger.info("边缘证书模式");
     for (const siteId of this.siteIds) {
       await this.clearSiteLimitCert(client, siteId);
       try {
         const res = await client.doRequest({
-          // 接口名称
           action: "SetCertificate",
-          // 接口版本
           version: "2024-09-10",
           data: {
             body: {
               SiteId: siteId,
               CasId: certId,
               Type: "cas",
-              Name: certName
-            }
-          }
+              Name: certName,
+            },
+          },
         });
-        this.logger.info(`部署站点[${siteId}]证书成功：${JSON.stringify(res)}`);
-
+        this.logger.info(`部署站点[${siteId}]边缘证书成功：${JSON.stringify(res)}`);
       } catch (e) {
         if (e.message.includes("Certificate.Duplicated")) {
           this.logger.info(`站点[${siteId}]证书已存在,无需重复部署`);
@@ -176,12 +216,52 @@ export class AliyunDeployCertToESA extends AbstractTaskPlugin {
         try {
           await this.clearSiteExpiredCert(client, siteId);
         } catch (e) {
-          this.logger.error(`清理站点[${siteId}]过期证书失败`, e)
+          this.logger.error(`清理站点[${siteId}]过期证书失败`, e);
         }
       }
     }
   }
 
+  async executeSaaS(client: AliyunClientV2, certId: number, certName: string) {
+    this.logger.info("SaaS证书模式");
+
+    if (!this.siteIds || this.siteIds.length === 0) {
+      throw new Error("SaaS证书模式下请先选择站点");
+    }
+    if (this.siteIds.length > 1) {
+      throw new Error(`SaaS证书模式下站点只能单选，当前已选择 ${this.siteIds.length} 个站点，请修改为只选择一个站点`);
+    }
+
+    if (!this.saasDomainIds || this.saasDomainIds.length === 0) {
+      throw new Error("SaaS证书模式下请选择要部署的SaaS域名");
+    }
+
+    for (const hostnameId of this.saasDomainIds) {
+      this.logger.info(`开始更新SaaS域名[${hostnameId}]证书`);
+      try {
+        const res = await client.doRequest({
+          action: "UpdateCustomHostname",
+          version: "2024-09-10",
+          data: {
+            body: {
+              HostnameId: parseInt(hostnameId, 10),
+              SslFlag: "on",
+              CertType: "cas",
+              CasId: certId,
+              CasRegion: this.regionId,
+            },
+          },
+        });
+        this.logger.info(`更新SaaS域名[${hostnameId}]证书成功：${JSON.stringify(res)}`);
+      } catch (e) {
+        if (e.message?.includes("Certificate.Duplicated")) {
+          this.logger.info(`SaaS域名[${hostnameId}]证书已存在,无需重复部署`);
+        } else {
+          throw e;
+        }
+      }
+    }
+  }
 
   async getClient(access: AliyunAccess) {
     const endpoint = `esa.${this.regionId}.aliyuncs.com`;
@@ -199,7 +279,7 @@ export class AliyunDeployCertToESA extends AbstractTaskPlugin {
       action: "ListSites",
       version: "2024-09-10",
       method: "GET",
-      data: {}
+      data: {},
     });
 
     const list = res?.Sites;
@@ -211,7 +291,49 @@ export class AliyunDeployCertToESA extends AbstractTaskPlugin {
       return {
         label: item.SiteName,
         value: item.SiteId,
-        domain: item.SiteName
+        domain: item.SiteName,
+      };
+    });
+    return this.ctx.utils.options.buildGroupOptions(options, this.certDomains);
+  }
+
+  async onGetCustomHostnameList(data: any) {
+    if (!this.accessId) {
+      throw new Error("请选择Access授权");
+    }
+    if (!this.siteIds || this.siteIds.length === 0) {
+      throw new Error("请先选择站点");
+    }
+    if (this.siteIds.length > 1) {
+      throw new Error("SaaS模式下站点只能单选，请先修改站点选择");
+    }
+
+    const siteId = this.siteIds[0];
+    const access = await this.getAccess<AliyunAccess>(this.accessId);
+    const client = await this.getClient(access);
+
+    const res = await client.doRequest({
+      action: "ListCustomHostnames",
+      version: "2024-09-10",
+      data: {
+        body: {
+          SiteId: parseInt(siteId, 10),
+          PageSize: 500,
+          PageNumber: 1,
+        },
+      },
+    });
+
+    const hostnames = res?.Hostnames;
+    if (!hostnames || hostnames.length === 0) {
+      throw new Error("该站点下没有找到SaaS域名，请先在ESA控制台添加SaaS域名");
+    }
+
+    const options = hostnames.map((item: any) => {
+      return {
+        label: `${item.Hostname}（${item.Status}）`,
+        value: String(item.HostnameId),
+        domain: item.Hostname,
       };
     });
     return this.ctx.utils.options.buildGroupOptions(options, this.certDomains);
@@ -226,9 +348,9 @@ export class AliyunDeployCertToESA extends AbstractTaskPlugin {
       data: {
         query: {
           SiteId: siteId,
-          PageSize: 100
-        }
-      }
+          PageSize: 100,
+        },
+      },
     });
 
     const list = certListRes.Result;
@@ -245,21 +367,19 @@ export class AliyunDeployCertToESA extends AbstractTaskPlugin {
             data: {
               query: {
                 SiteId: siteId,
-                Id: item.id
-              }
-            }
+                Id: item.id,
+              },
+            },
           });
           this.logger.info(`证书${item.Name}已删除`);
         } catch (e) {
-          this.logger.error(`过期证书${item.Name}删除失败：`, e.message)
+          this.logger.error(`过期证书${item.Name}删除失败：`, e.message);
         }
       }
     }
   }
 
-
   async clearSiteLimitCert(client: AliyunClientV2, siteId: string) {
-    
     //删除最旧的证书
     const certLimit = this.certLimit || 2;
     this.logger.info(`站点[${siteId}]证书数量检查，当前限制${certLimit}`);
@@ -270,31 +390,31 @@ export class AliyunDeployCertToESA extends AbstractTaskPlugin {
       data: {
         query: {
           SiteId: siteId,
-          PageSize: 100
-        }
-      }
+          PageSize: 100,
+        },
+      },
     });
 
     let list = certListRes.Result || [];
     list = list.filter((item: any) => item.Type === "cas");
     if (!list || list.length === 0) {
       this.logger.info(`站点[${siteId}]没有CAS证书, 无需删除`);
-      return 
+      return;
     }
-    
+
     if (list.length < certLimit) {
       this.logger.info(`站点[${siteId}]证书数量（${list.length}）未超限制, 无需删除`);
       return;
     }
     this.logger.info(`站点[${siteId}]证书数量（${list.length}）已超限制, 开始删除最旧的证书`);
 
-    let  oldly:any = null;
+    let oldly: any = null;
     for (const item of list) {
       if (!oldly) {
         oldly = item;
         continue;
       }
-      if (dayjs(item.CreateTime).valueOf() < (dayjs(oldly.CreateTime)).valueOf()){
+      if (dayjs(item.CreateTime).valueOf() < dayjs(oldly.CreateTime).valueOf()) {
         oldly = item;
       }
     }
@@ -306,9 +426,9 @@ export class AliyunDeployCertToESA extends AbstractTaskPlugin {
       data: {
         query: {
           SiteId: siteId,
-          Id: oldly.Id
-        }
-      }
+          Id: oldly.Id,
+        },
+      },
     });
     this.logger.info(`最旧证书${oldly.Name}已删除`);
   }

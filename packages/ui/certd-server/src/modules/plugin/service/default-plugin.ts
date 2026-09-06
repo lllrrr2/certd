@@ -1,6 +1,5 @@
 import { CertApplyPluginNames } from "@certd/plugin-cert";
 
-
 export function getDefaultAccessPlugin() {
   const metadata = `
 input:
@@ -18,7 +17,7 @@ input:
     component:
       name: a-input
       allowClear: true
-`
+`;
 
   const script = `
 // 必须使用 await import 来引入模块
@@ -31,19 +30,18 @@ return class DemoAccess extends BaseAccess {
 }
 `;
   return {
-    metadata:metadata,
-    content: script
+    metadata: metadata,
+    content: script,
   };
 }
 
 export function getDefaultDeployPlugin() {
-
-  let certApplyNames = ''
+  let certApplyNames = "";
   for (const name of CertApplyPluginNames) {
     certApplyNames += `
-        - "${name}"`
+        - "${name}"`;
   }
-  const metadata =`
+  const metadata = `
 input:   # 插件的输入参数
   cert:
     title: 前置任务证书
@@ -90,8 +88,7 @@ input:   # 插件的输入参数
 #output:  # 输出参数，一般插件都不需要配置此项
 #  outputName:
 #
-`
-
+`;
 
   const script = `
 // 要用await来import模块
@@ -129,22 +126,22 @@ return class DemoTask extends AbstractTaskPlugin {
     // this.outputName = xxxx //设置输出参数，可以被其他插件选择使用
   }
 }
-`
+`;
   return {
     metadata: metadata,
-    content: script
+    content: script,
   };
 }
 
 export function getDefaultDnsPlugin() {
   const metadata = `
 accessType: aliyun # 授权类型名称
-#dependPlugins: # 依赖第三方库，安装插件时会安装依赖库，尽量使用certd已安装的库，比如http、lodash-es、utils
+#dependPackages: # 依赖第三方 npm 包，运行插件时会按需安装，尽量使用 certd 已安装的库，比如 http、lodash-es、utils
 #  @alicloud/openapi-client: ^0.4.12
-#dependLibs: # 依赖的插件，应用商店安装时会先安装依赖插件
-#  aliyun: *
+#dependPlugins: # 依赖的其他插件，使用 type:name 格式避免不同类型插件同名
+#  access:aliyun: *
 
-  `
+  `;
 
   const script = `
 const { AbstractDnsProvider } = await import("@certd/pipeline")
@@ -186,10 +183,47 @@ return class DemoDnsProvider extends AbstractDnsProvider {
   }
 }
 
-`
+`;
 
   return {
     metadata: metadata,
-    content: script
+    content: script,
+  };
+}
+
+export function getDefaultNotificationPlugin() {
+  const metadata = `
+input:   # 通知插件的输入参数
+  webhook:
+    title: 通知渠道webhook地址
+    component:
+      name: a-input
+    required: true
+  key:
+    title: 通知渠道授权key
+    component:
+      name: a-input
+    required: false
+`;
+
+  const script = `
+// 必须使用 await import 来引入模块
+const { BaseNotification } = await import("@certd/pipeline")
+// 需要返回一个继承BaseNotification的类
+return class DemoNotification extends BaseNotification {
+  // 通知输入参数，对应左边 input 配置
+  async send(body){
+    this.logger.info("title:", body.title)
+    this.logger.info("content:", body.content)
+    this.logger.info("webhook:", body.webhook)
+    // 调用第三方 API 发送通知  
+    // await this.ctx.http.request({url:body.webhook,method:"POST",body:body})
   }
+}
+`;
+
+  return {
+    metadata: metadata,
+    content: script,
+  };
 }

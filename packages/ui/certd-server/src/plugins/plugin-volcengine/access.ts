@@ -1,38 +1,36 @@
-import { AccessInput, BaseAccess, IsAccess } from '@certd/pipeline';
-import { VolcengineClient } from './ve-client.js';
+import { AccessInput, BaseAccess, IsAccess } from "@certd/pipeline";
+import { VolcengineClient } from "./ve-client.js";
 
 /**
  * 这个注解将注册一个授权配置
  * 在certd的后台管理系统中，用户可以选择添加此类型的授权
  */
 @IsAccess({
-  name: 'volcengine',
-  title: '火山引擎',
-  desc: '',
-  icon: 'svg:icon-volcengine',
+  name: "volcengine",
+  title: "火山引擎",
+  desc: "",
+  icon: "svg:icon-volcengine",
   order: 1,
 })
 export class VolcengineAccess extends BaseAccess {
-
   @AccessInput({
-    title: 'AccessKeyID',
+    title: "AccessKeyID",
     component: {
-      placeholder: 'AccessKeyID',
+      placeholder: "AccessKeyID",
     },
     helper: "[获取密钥](https://console.volcengine.com/iam/keymanage/)",
     required: true,
   })
-  accessKeyId = '';
+  accessKeyId = "";
   @AccessInput({
-    title: 'SecretAccessKey',
+    title: "SecretAccessKey",
     component: {
-      placeholder: 'SecretAccessKey',
+      placeholder: "SecretAccessKey",
     },
     required: true,
     encrypt: true,
   })
-  secretAccessKey = '';
-
+  secretAccessKey = "";
 
   @AccessInput({
     title: "测试",
@@ -45,7 +43,11 @@ export class VolcengineAccess extends BaseAccess {
   testRequest = true;
 
   async onTestRequest() {
-    await this.getCallerIdentity();
+    const result = await this.getCallerIdentity();
+    this.ctx.logger.info("✅ 密钥有效！");
+    this.ctx.logger.info(`   账户ID: ${result.accountId}`);
+    this.ctx.logger.info(`   ARN: ${result.arn}`);
+    this.ctx.logger.info(`   用户ID: ${result.userId}`);
     return "ok";
   }
 
@@ -62,21 +64,18 @@ export class VolcengineAccess extends BaseAccess {
     });
 
     const result = res.Result || {};
-    this.ctx.logger.info("✅ 密钥有效！");
-    this.ctx.logger.info(`   账户ID: ${result.AccountId}`);
-    this.ctx.logger.info(`   ARN: ${result.Trn}`);
-    this.ctx.logger.info(`   用户ID: ${result.IdentityId}`);
-
     return {
       valid: true,
       accountId: result.AccountId,
       arn: result.Trn,
-      userId: result.IdentityId
+      userId: parseInt(result.IdentityId),
     };
-
   }
 
-
+  async getUserId() {
+    const { userId } = await this.getCallerIdentity();
+    return userId;
+  }
 }
 
 new VolcengineAccess();

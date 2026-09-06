@@ -1,19 +1,11 @@
 import { Config, Controller, Get, Inject, Provide } from "@midwayjs/core";
-import {
-  BaseController,
-  Constants,
-  SysHeaderMenus,
-  SysInstallInfo,
-  SysPublicSettings,
-  SysSettingsService,
-  SysSiteEnv,
-  SysSiteInfo,
-  SysSuiteSetting
-} from "@certd/lib-server";
+import { BaseController, Constants, SysHeaderMenus, SysInstallInfo, SysPublicSettings, SysSettingsService, SysSiteEnv, SysSiteInfo, SysSuiteSetting } from "@certd/lib-server";
 import { AppKey, getPlusInfo, isComm } from "@certd/plus-core";
+import { SysInviteCommissionSetting } from "@certd/commercial-core";
 import { cloneDeep } from "lodash-es";
 import { getVersion } from "../../utils/version.js";
 import { http } from "@certd/basic";
+import { getReleaseMode } from "./app-controller.js";
 
 /**
  */
@@ -53,13 +45,25 @@ export class BasicSettingsController extends BaseController {
     }
     const setting = await this.sysSettingsService.getSetting<SysSuiteSetting>(SysSuiteSetting);
     return {
-      enabled: setting.enabled
+      enabled: setting.enabled,
+    };
+  }
+
+  public async getInviteSetting() {
+    if (!isComm()) {
+      return { enabled: false };
+    }
+    const setting = await this.sysSettingsService.getSetting<SysInviteCommissionSetting>(SysInviteCommissionSetting);
+    return {
+      enabled: setting.enabled,
+      levelEnabled: setting.levelEnabled === true,
+      fixedCommissionRate: setting.fixedCommissionRate || 10,
     };
   }
 
   public async getSiteEnv() {
     const env: SysSiteEnv = {
-      agent: this.agentConfig
+      agent: this.agentConfig,
     };
     return env;
   }
@@ -74,10 +78,9 @@ export class BasicSettingsController extends BaseController {
   @Get("/productInfo", { description: Constants.per.guest })
   async getProductInfo() {
     const info = await http.request({
-      url: "https://app.handfree.work/certd/info.json"
+      url: "https://app.handfree.work/certd/info.json",
     });
     return this.ok(info);
-
   }
 
   @Get("/all", { description: Constants.per.guest })
@@ -92,6 +95,7 @@ export class BasicSettingsController extends BaseController {
     const plusInfo = await this.plusInfo();
     const headerMenus = await this.getHeaderMenus();
     const suiteSetting = await this.getSuiteSetting();
+    const inviteSetting = await this.getInviteSetting();
     const version = await getVersion();
     return this.ok({
       sysPublic,
@@ -101,9 +105,11 @@ export class BasicSettingsController extends BaseController {
       plusInfo,
       headerMenus,
       suiteSetting,
+      inviteSetting,
       app: {
         time: new Date().getTime(),
-        version
+        version,
+        releaseMode: getReleaseMode(),
       },
     });
   }

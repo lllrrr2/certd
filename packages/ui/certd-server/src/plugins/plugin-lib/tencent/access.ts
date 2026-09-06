@@ -1,11 +1,16 @@
 import { IsAccess, AccessInput, BaseAccess } from "@certd/pipeline";
 
-@IsAccess({
+const tencentAccessDefine: any = {
   name: "tencent",
   title: "腾讯云",
   icon: "svg:icon-tencentcloud",
   order: 0,
-})
+  dependPackages: {
+    "tencentcloud-sdk-nodejs": "^4.1.112",
+  },
+};
+
+@IsAccess(tencentAccessDefine)
 export class TencentAccess extends BaseAccess {
   @AccessInput({
     title: "secretId",
@@ -55,10 +60,8 @@ export class TencentAccess extends BaseAccess {
       vModel: "checked",
     },
   })
-  closeExpiresNotify: boolean = true;
+  closeExpiresNotify = true;
 
-
-    
   @AccessInput({
     title: "测试",
     component: {
@@ -74,7 +77,6 @@ export class TencentAccess extends BaseAccess {
     return "ok";
   }
 
-
   isIntl() {
     return this.accountType === "intl";
   }
@@ -84,31 +86,31 @@ export class TencentAccess extends BaseAccess {
   }
 
   buildEndpoint(endpoint: string) {
-    return `${this.intlDomain()}${endpoint}`;
+    // 改成  xxx.intl.tencentcloudapi.com
+    return `${endpoint.replace("tencentcloudapi.com", "")}${this.intlDomain()}tencentcloudapi.com`;
   }
 
-  async getCallerIdentity(){
+  async getCallerIdentity() {
     const client = await this.getStsClient();
 
-     // 调用 GetCallerIdentity 接口
+    // 调用 GetCallerIdentity 接口
     const result = await client.GetCallerIdentity();
-    
+
     this.ctx.logger.info("✅ 密钥有效！");
     this.ctx.logger.info(`   账户ID: ${result.AccountId}`);
     this.ctx.logger.info(`   ARN: ${result.Arn}`);
     this.ctx.logger.info(`   用户ID: ${result.UserId}`);
-    
+
     return {
       valid: true,
       accountId: result.AccountId,
       arn: result.Arn,
-      userId: result.UserId
+      userId: result.UserId,
     };
   }
 
-
-  async getStsClient(){
-    const sdk = await import('tencentcloud-sdk-nodejs/tencentcloud/services/sts/v20180813/index.js');
+  async getStsClient() {
+    const sdk = await this.importRuntime("tencentcloud-sdk-nodejs/tencentcloud/services/sts/v20180813/index.js");
     const StsClient = sdk.v20180813.Client;
 
     const clientConfig = {
@@ -116,7 +118,7 @@ export class TencentAccess extends BaseAccess {
         secretId: this.secretId,
         secretKey: this.secretKey,
       },
-      region: 'ap-shanghai',
+      region: "ap-shanghai",
       profile: {
         httpProfile: {
           endpoint: `sts.${this.intlDomain()}tencentcloudapi.com`,

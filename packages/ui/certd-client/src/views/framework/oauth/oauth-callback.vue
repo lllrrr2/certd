@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="oauth-callback-page">
     <div class="oauth-callback-content">
       <div v-if="!bindRequired" class="oauth-callback-title">
@@ -29,6 +29,7 @@ import { useRoute, useRouter } from "vue-router";
 import { useUserStore } from "/@/store/user";
 import { notification } from "ant-design-vue";
 import { useSettingStore } from "/@/store/settings";
+import { inviteUtils } from "/@/utils/util.invite";
 
 const route = useRoute();
 const router = useRouter();
@@ -70,7 +71,7 @@ async function doBindCurrent() {
     message: "绑定成功",
   });
   //跳转到首页
-  router.replace("/certd/mine/user-profile");
+  router.replace("/cert/mine/user-profile");
 }
 
 onMounted(async () => {
@@ -99,7 +100,11 @@ async function goBindUser() {
 
 async function autoRegister() {
   //自动注册账号
-  const res = await api.AutoRegister(oauthType, bindCode.value);
+  const inviteCode = inviteUtils.get();
+  const res = await api.AutoRegister(oauthType, bindCode.value, inviteCode);
+  if (inviteCode) {
+    inviteUtils.clear();
+  }
   //登录成功
   userStore.onLoginSuccess(res);
   //跳转到首页

@@ -31,7 +31,11 @@ header中传入x-certd-token即可调用开放接口
 支持证书id和域名两种方式获取证书。
 
 ### 创建新的证书申请
-参数autoApply=true，将在没有证书时自动触发申请证书，检查逻辑如下：
+参数`autoApply=true`将在没有证书时自动触发申请证书。申请参数支持另外传入：
+- `autoApplyTemplateId`：使用指定 ID 的证书申请参数模版；不传时不使用模版
+- `autoApplyParams`：自定义证书申请参数，会与系统默认参数、模版参数合并，并覆盖同名字段
+
+检查逻辑如下：
 1. 如果证书仓库里面有，且没有过期，就直接返回证书
 2. 如果没有或者已过期，就会去找流水线，有就触发流水线执行
 3. 如果没有流水线，就创建一个流水线，触发运行（`注意：需要提前在域名管理中配置好域名校验方式，否则会申请失败`）
@@ -43,7 +47,13 @@ header中传入x-certd-token即可调用开放接口
 
 ## 客户端工具
 
-### SSL-Assistant
+### 官方客户端：Certd Client
+`Certd Client` 是 Certd 的官方证书部署客户端。运行在应用服务器上，自动发现本机 Nginx、Apache 和 IIS 站点，然后从 Certd 获取新证书并部署到本机。适用于不希望服务器开放 SSH、无法由 Certd 直接访问目标服务器的场景。
+
+项目主页：[AtomGit](https://atomgit.com/certd/certd-client/) | [GitHub](https://github.com/certd/certd-client/)
+下载地址：[AtomGit Releases](https://atomgit.com/certd/certd-client/releases) | [GitHub Releases](https://github.com/certd/certd-client/releases)
+
+### 第三方客户端：SSL-Assistant
 `SSL Assistant` 是一个基于 Go 语言开发的跨平台证书部署管理助手。    
 支持自动扫描主机`Nginx`配置，然后从Certd拉取证书并部署。     
 在不想暴露ssh主机密码情况下，该工具非常好用。

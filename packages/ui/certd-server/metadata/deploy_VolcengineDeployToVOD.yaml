@@ -47,7 +47,7 @@ input:
     title: 区域
     helper: 选择火山引擎区域
     component:
-      name: select
+      name: a-select
       options:
         - value: cn-north-1
           label: 华北1（北京）
@@ -61,12 +61,12 @@ input:
     component:
       name: remote-select
       vModel: value
-      mode: default
+      mode: tags
       type: plugin
       action: onGetSpaceList
       search: false
       pager: false
-      multi: false
+      single: true
       watches:
         - certDomains
         - accessId
@@ -96,6 +96,8 @@ input:
           label: 点播加速域名
         - value: image
           label: 封面加速域名
+        - value: third
+          label: 自定义源站
     value: play
     required: true
     order: 0
@@ -109,7 +111,7 @@ input:
       action: onGetDomainList
       search: false
       pager: false
-      multi: true
+      single: false
       watches:
         - certDomains
         - accessId

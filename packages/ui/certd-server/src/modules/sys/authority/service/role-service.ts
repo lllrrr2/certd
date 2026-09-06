@@ -1,14 +1,14 @@
-import { Inject, Provide, Scope, ScopeEnum } from '@midwayjs/core';
-import { InjectEntityModel } from '@midwayjs/typeorm';
-import { In, Repository } from 'typeorm';
-import { BaseService } from '@certd/lib-server';
-import { RoleEntity } from '../entity/role.js';
-import { UserRoleService } from './user-role-service.js';
-import { RolePermissionEntity } from '../entity/role-permission.js';
-import { PermissionService } from './permission-service.js';
-import * as _ from 'lodash-es';
-import { RolePermissionService } from './role-permission-service.js';
-import { LRUCache } from 'lru-cache';
+import { Inject, Provide, Scope, ScopeEnum } from "@midwayjs/core";
+import { InjectEntityModel } from "@midwayjs/typeorm";
+import { In, Repository } from "typeorm";
+import { BaseService } from "@certd/lib-server";
+import { RoleEntity } from "../entity/role.js";
+import { UserRoleService } from "./user-role-service.js";
+import { RolePermissionEntity } from "../entity/role-permission.js";
+import { PermissionService } from "./permission-service.js";
+import * as _ from "lodash-es";
+import { RolePermissionService } from "./role-permission-service.js";
+import { LRUCache } from "lru-cache";
 
 const permissionCache = new LRUCache<string, any>({
   max: 1000,
@@ -30,15 +30,13 @@ export class RoleService extends BaseService<RoleEntity> {
   @Inject()
   rolePermissionService: RolePermissionService;
 
- 
-
   //@ts-ignore
   getRepository() {
     return this.repository;
   }
 
   async getRoleIdsByUserId(id: any) {
-    const userRoles = await this.userRoleService.find({
+    const userRoles: any = await this.userRoleService.find({
       where: { userId: id },
     });
     return userRoles.map(item => item.roleId);
@@ -55,10 +53,7 @@ export class RoleService extends BaseService<RoleEntity> {
     if (!roleIds || roleIds.length === 0) {
       return [];
     }
-    return await this.permissionService.repository
-      .createQueryBuilder('permission')
-      .innerJoinAndSelect(RolePermissionEntity, 'rp', 'rp.permissionId = permission.id and rp.roleId in (:...roleIds)', { roleIds })
-      .getMany();
+    return await this.permissionService.repository.createQueryBuilder("permission").innerJoinAndSelect(RolePermissionEntity, "rp", "rp.permissionId = permission.id and rp.roleId in (:...roleIds)", { roleIds }).getMany();
   }
 
   async addRoles(userId: number, roles) {
@@ -122,7 +117,7 @@ export class RoleService extends BaseService<RoleEntity> {
   }
 
   async getCachedPermissionSetByRoleIds(roleIds: number[]): Promise<Set<string>> {
-    const roleIdsKey = roleIds.join(',');
+    const roleIdsKey = roleIds.join(",");
     let permissionSet = permissionCache.get(roleIdsKey);
     if (permissionSet) {
       return permissionSet;
@@ -136,9 +131,9 @@ export class RoleService extends BaseService<RoleEntity> {
   async delete(id: any) {
     const idArr = this.resolveIdArr(id);
     //@ts-ignore
-    const urs = await this.userRoleService.find({ where: { roleId: In(idArr) } });
+    const urs: any = await this.userRoleService.find({ where: { roleId: In(idArr) } });
     if (urs.length > 0) {
-      throw new Error('该角色已被用户使用，无法删除');
+      throw new Error("该角色已被用户使用，无法删除");
     }
     await this.deleteWhere({ id: In(idArr) });
   }

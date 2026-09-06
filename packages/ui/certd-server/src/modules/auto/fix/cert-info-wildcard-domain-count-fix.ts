@@ -21,7 +21,7 @@ export class CertInfoWildcardDomainCountFix {
         },
       });
       let fixedCount = 0;
-      for (const item of list) {
+      for (const item of list as any[]) {
         if (!item.domains) {
           continue;
         }
@@ -38,8 +38,10 @@ export class CertInfoWildcardDomainCountFix {
       if (fixedCount > 0) {
         logger.info(`已修复证书泛域名数量历史数据，数量=${fixedCount}`);
       }
+      return true;
     } catch (e: any) {
       logger.error("修复证书泛域名数量历史数据失败", e);
     }
+    return false;
   }
 }

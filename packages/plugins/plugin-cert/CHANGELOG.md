@@ -3,6 +3,88 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## [1.44.3](https://github.com/certd/certd/compare/v1.44.2...v1.44.3) (2026-09-06)
+
+**Note:** Version bump only for package @certd/plugin-cert
+
+## [1.44.2](https://github.com/certd/certd/compare/v1.44.1...v1.44.2) (2026-09-03)
+
+**Note:** Version bump only for package @certd/plugin-cert
+
+## [1.44.1](https://github.com/certd/certd/compare/v1.44.0...v1.44.1) (2026-09-02)
+
+**Note:** Version bump only for package @certd/plugin-cert
+
+# [1.44.0](https://github.com/certd/certd/compare/v1.43.0...v1.44.0) (2026-08-28)
+
+**Note:** Version bump only for package @certd/plugin-cert
+
+# [1.43.0](https://github.com/certd/certd/compare/v1.42.6...v1.43.0) (2026-08-14)
+
+**Note:** Version bump only for package @certd/plugin-cert
+
+## [1.42.6](https://github.com/certd/certd/compare/v1.42.5...v1.42.6) (2026-07-18)
+
+**Note:** Version bump only for package @certd/plugin-cert
+
+## [1.42.5](https://github.com/certd/certd/compare/v1.42.4...v1.42.5) (2026-07-15)
+
+**Note:** Version bump only for package @certd/plugin-cert
+
+## [1.42.4](https://github.com/certd/certd/compare/v1.42.3...v1.42.4) (2026-07-11)
+
+**Note:** Version bump only for package @certd/plugin-cert
+
+## [1.42.3](https://github.com/certd/certd/compare/v1.42.2...v1.42.3) (2026-07-08)
+
+**Note:** Version bump only for package @certd/plugin-cert
+
+## [1.42.2](https://github.com/certd/certd/compare/v1.42.1...v1.42.2) (2026-07-07)
+
+**Note:** Version bump only for package @certd/plugin-cert
+
+## [1.42.1](https://github.com/certd/certd/compare/v1.42.0...v1.42.1) (2026-07-06)
+
+**Note:** Version bump only for package @certd/plugin-cert
+
+# [1.42.0](https://github.com/certd/certd/compare/v1.41.4...v1.42.0) (2026-07-05)
+
+**Note:** Version bump only for package @certd/plugin-cert
+
+## [1.41.4](https://github.com/certd/certd/compare/v1.41.3...v1.41.4) (2026-06-14)
+
+**Note:** Version bump only for package @certd/plugin-cert
+
+## [1.41.3](https://github.com/certd/certd/compare/v1.41.2...v1.41.3) (2026-06-11)
+
+**Note:** Version bump only for package @certd/plugin-cert
+
+## [1.41.2](https://github.com/certd/certd/compare/v1.41.1...v1.41.2) (2026-06-10)
+
+**Note:** Version bump only for package @certd/plugin-cert
+
+## [1.41.1](https://github.com/certd/certd/compare/v1.41.0...v1.41.1) (2026-06-05)
+
+**Note:** Version bump only for package @certd/plugin-cert
+
+# [1.41.0](https://github.com/certd/certd/compare/v1.40.5...v1.41.0) (2026-06-04)
+
+**Note:** Version bump only for package @certd/plugin-cert
+
+## [1.40.5](https://github.com/certd/certd/compare/v1.40.4...v1.40.5) (2026-05-26)
+
+### Bug Fixes
+
+* 修复阿里云证书订单orderid 选择出错的问题 ([af9047b](https://github.com/certd/certd/commit/af9047bf3c54ce71b11727ccc6220288ed1f57be))
+
+## [1.40.4](https://github.com/certd/certd/compare/v1.40.3...v1.40.4) (2026-05-24)
+
+**Note:** Version bump only for package @certd/plugin-cert
+
+## [1.40.3](https://github.com/certd/certd/compare/v1.40.2...v1.40.3) (2026-05-21)
+
+**Note:** Version bump only for package @certd/plugin-cert
+
 ## [1.40.2](https://github.com/certd/certd/compare/v1.40.1...v1.40.2) (2026-05-19)
 
 **Note:** Version bump only for package @certd/plugin-cert

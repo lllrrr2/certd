@@ -53,7 +53,7 @@ input:
       action: onGetRegionList
       search: false
       pager: false
-      multi: true
+      single: false
       watches:
         - certDomains
         - accessId
@@ -92,9 +92,9 @@ input:
       mode: tags
       type: plugin
       action: onGetDomainList
-      search: false
-      pager: false
-      multi: true
+      search: true
+      pager: true
+      single: false
       watches:
         - certDomains
         - accessId

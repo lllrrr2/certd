@@ -1,5 +1,11 @@
 import { useSettingStore } from "/@/store/settings";
 
+function isInviteLevelEnabled() {
+  const settingStore = useSettingStore();
+  const levelEnabled = settingStore.inviteSetting?.levelEnabled;
+  return settingStore.isComm && levelEnabled === true;
+}
+
 export const sysResources = [
   {
     title: "certd.sysResources.sysRoot",
@@ -106,7 +112,7 @@ export const sysResources = [
       },
       {
         title: "certd.sysResources.headerMenus",
-        name: "HeaderMenus",
+        name: "SettingsHeaderMenus",
         path: "/sys/settings/header-menus",
         component: "/sys/settings/header-menus/index.vue",
         meta: {
@@ -122,7 +128,7 @@ export const sysResources = [
       },
       {
         title: "certd.sysResources.sysAccess",
-        name: "SysAccess",
+        name: "SysAccessManager",
         path: "/sys/access",
         component: "/sys/access/index.vue",
         meta: {
@@ -143,19 +149,6 @@ export const sysResources = [
         component: "/sys/plugin/index.vue",
         meta: {
           icon: "ion:extension-puzzle-outline",
-          permission: "sys:settings:view",
-          keepAlive: true,
-          auth: true,
-        },
-      },
-      {
-        title: "certd.sysResources.sysPluginEdit",
-        name: "SysPluginEdit",
-        path: "/sys/plugin/edit",
-        component: "/sys/plugin/edit.vue",
-        meta: {
-          isMenu: false,
-          icon: "ion:extension-puzzle",
           permission: "sys:settings:view",
           keepAlive: true,
           auth: true,
@@ -225,6 +218,44 @@ export const sysResources = [
         },
       },
       {
+        title: "certd.sysResources.userDataManager",
+        name: "UserDataManager",
+        path: "/sys/user-data",
+        redirect: "/sys/pipeline",
+        meta: {
+          icon: "ion:folder-open-outline",
+          permission: "sys:settings:view",
+          keepAlive: true,
+          auth: true,
+        },
+        children: [
+          {
+            title: "certd.sysResources.pipelineManager",
+            name: "SysPipelineManager",
+            path: "/sys/pipeline",
+            component: "/sys/pipeline/index.vue",
+            meta: {
+              icon: "ion:analytics-sharp",
+              permission: "sys:settings:view",
+              keepAlive: true,
+              auth: true,
+            },
+          },
+          {
+            title: "certd.sysResources.siteMonitorManager",
+            name: "SysSiteMonitorManager",
+            path: "/sys/monitor/site",
+            component: "/sys/monitor/site/index.vue",
+            meta: {
+              icon: "ion:videocam-outline",
+              permission: "sys:settings:view",
+              keepAlive: true,
+              auth: true,
+            },
+          },
+        ],
+      },
+      {
         title: "certd.sysResources.suiteManager",
         name: "SuiteManager",
         path: "/sys/suite",
@@ -267,7 +298,7 @@ export const sysResources = [
               },
               icon: "ion:bag-check",
               permission: "sys:settings:edit",
-              keepAlive: true,
+              keepAlive: false,
               auth: true,
             },
           },
@@ -286,7 +317,101 @@ export const sysResources = [
               keepAlive: true,
             },
           },
+          {
+            title: "certd.sysResources.inviteCommissionSetting",
+            name: "SysInviteCommissionSetting",
+            path: "/sys/suite/invite/setting",
+            component: "/sys/suite/invite/setting.vue",
+            meta: {
+              show: () => {
+                const settingStore = useSettingStore();
+                return settingStore.isComm;
+              },
+              icon: "ion:gift-outline",
+              permission: "sys:settings:edit",
+              auth: true,
+              keepAlive: true,
+            },
+          },
+          {
+            title: "certd.sysResources.inviteLevel",
+            name: "SysInviteLevel",
+            path: "/sys/suite/invite/level",
+            component: "/sys/suite/invite/level.vue",
+            meta: {
+              show: () => {
+                return isInviteLevelEnabled();
+              },
+              icon: "ion:ribbon-outline",
+              permission: "sys:settings:edit",
+              auth: true,
+              keepAlive: true,
+            },
+          },
+          {
+            title: "certd.sysResources.inviteUserLevel",
+            name: "SysInviteUserLevel",
+            path: "/sys/suite/invite/user-level",
+            component: "/sys/suite/invite/user-level.vue",
+            meta: {
+              show: () => {
+                return isInviteLevelEnabled();
+              },
+              icon: "ion:people-outline",
+              permission: "sys:settings:edit",
+              auth: true,
+              keepAlive: true,
+            },
+          },
+          {
+            title: "certd.sysResources.inviteWithdraw",
+            name: "SysInviteWithdraw",
+            path: "/sys/suite/invite/withdraw",
+            component: "/sys/suite/invite/withdraw.vue",
+            meta: {
+              show: () => {
+                const settingStore = useSettingStore();
+                return settingStore.isComm;
+              },
+              icon: "ion:cash-outline",
+              permission: "sys:settings:edit",
+              auth: true,
+              keepAlive: true,
+            },
+          },
+          {
+            title: "certd.sysResources.activationCodeManager",
+            name: "SysProductActivationCode",
+            path: "/sys/suite/activation-code",
+            component: "/sys/suite/activation-code/index.vue",
+            meta: {
+              show: () => {
+                const settingStore = useSettingStore();
+                return settingStore.isComm;
+              },
+              icon: "ion:key-outline",
+              permission: "sys:settings:edit",
+              auth: true,
+              keepAlive: true,
+            },
+          },
         ],
+      },
+      {
+        title: "certd.sysResources.auditLog",
+        name: "SysAuditLog",
+        path: "/sys/enterprise/audit",
+        component: "/sys/enterprise/audit/index.vue",
+        meta: {
+          icon: "ion:document-text-outline",
+          keepAlive: true,
+          auth: true,
+          isMenu: true,
+          show: () => {
+            const settingStore = useSettingStore();
+            return settingStore.isPlus;
+          },
+        },
       },
       {
         title: "certd.sysResources.netTest",

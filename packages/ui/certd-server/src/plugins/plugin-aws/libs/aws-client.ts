@@ -1,9 +1,9 @@
 // 导入所需的 SDK 模块
-import { AwsAccess } from '../access.js';
-import { CertInfo, DomainRecord } from '@certd/plugin-cert';
-import { ILogger, utils } from '@certd/basic';
-import { PageRes, PageSearch } from '@certd/pipeline';
-type AwsClientOptions = { access: AwsAccess; region: string, logger: ILogger };
+import { AwsAccess } from "../access.js";
+import { CertInfo, DomainRecord } from "@certd/plugin-cert";
+import { ILogger, utils } from "@certd/basic";
+import { PageRes, PageSearch } from "@certd/pipeline";
+type AwsClientOptions = { access: AwsAccess; region: string; logger: ILogger };
 
 /**
  * https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/client/route-53-domains/
@@ -21,39 +21,45 @@ export class AwsClient {
   }
   async importCertificate(certInfo: CertInfo) {
     // 创建 ACM 客户端
-    const { ACMClient, ImportCertificateCommand } = await import('@aws-sdk/client-acm');
+    const { ACMClient, ImportCertificateCommand } = await this.access.importRuntime("@aws-sdk/client-acm");
     const acmClient = new ACMClient({
       region: this.region, // 替换为您的 AWS 区域
       credentials: {
         accessKeyId: this.access.accessKeyId, // 从环境变量中读取
         secretAccessKey: this.access.secretAccessKey,
       },
+      // Disable the SDK's own retries; withRetry/doRequest is the single retry authority.
+      maxAttempts: 1,
     });
 
-    const cert = certInfo.crt.split('-----END CERTIFICATE-----')[0] + '-----END CERTIFICATE-----';
+    // Split the full PEM chain: first block is the leaf cert, the rest is the intermediate chain
+    const pemBlocks = certInfo.crt.split(/(?<=-----END CERTIFICATE-----)/);
+    const cert = pemBlocks[0].trim();
+    const chain = pemBlocks.slice(1).join("").trim();
+
     // 构建上传参数
     const data = await acmClient.send(
       new ImportCertificateCommand({
         Certificate: Buffer.from(cert),
         PrivateKey: Buffer.from(certInfo.key),
-        // CertificateChain: certificateChain, // 可选
+        CertificateChain: chain ? Buffer.from(chain) : undefined,
       })
     );
-    console.log('Upload successful:', data);
+    this.logger.info(`Upload successful: ${data.CertificateArn}`);
     // 返回证书 ARN（Amazon Resource Name）
     return data.CertificateArn;
   }
 
-
   async getCallerIdentity() {
-    const { STSClient, GetCallerIdentityCommand } = await import ("@aws-sdk/client-sts");
+    const { STSClient, GetCallerIdentityCommand } = await this.access.importRuntime("@aws-sdk/client-sts");
 
     const client = new STSClient({
-      region: this.access.region || 'us-east-1',
+      region: this.access.region || "us-east-1",
       credentials: {
         accessKeyId: this.access.accessKeyId, // 从环境变量中读取
         secretAccessKey: this.access.secretAccessKey,
       },
+      maxAttempts: 1,
     });
 
     const command = new GetCallerIdentityCommand({});
@@ -64,36 +70,37 @@ export class AwsClient {
     return response;
   }
 
-
   async route53ClientGet() {
-    const { Route53Client } = await import('@aws-sdk/client-route-53');
+    const { Route53Client } = await this.access.importRuntime("@aws-sdk/client-route-53");
     return new Route53Client({
       region: this.region,
       credentials: {
         accessKeyId: this.access.accessKeyId, // 从环境变量中读取
         secretAccessKey: this.access.secretAccessKey,
       },
+      maxAttempts: 1,
     });
   }
 
-  async route53GetHostedZoneId(name: string): Promise<{ ZoneId: string, ZoneName: string }> {
+  async route53GetHostedZoneId(name: string): Promise<{ ZoneId: string; ZoneName: string }> {
     const hostedZones = await this.route53ListHostedZones(name);
-    const zoneId = hostedZones[0].Id.replace('/hostedzone/', '');
+    const zoneId = hostedZones[0].Id.replace("/hostedzone/", "");
     this.logger.info(`获取到hostedZoneId:${zoneId},name:${hostedZones[0].Name}`);
     return {
       ZoneId: zoneId,
       ZoneName: hostedZones[0].Name,
     };
   }
-  async route53ListHostedZones(name: string): Promise<{ Id: string, Name: string }[]> {
-    const { ListHostedZonesByNameCommand } = await import("@aws-sdk/client-route-53"); // ES Modules import
+  async route53ListHostedZones(name: string): Promise<{ Id: string; Name: string }[]> {
+    const { ListHostedZonesByNameCommand } = await this.access.importRuntime("@aws-sdk/client-route-53"); // ES Modules import
 
     const client = await this.route53ClientGet();
-    const input = { // ListHostedZonesByNameRequest
+    const input = {
+      // ListHostedZonesByNameRequest
       DNSName: name,
     };
     const command = new ListHostedZonesByNameCommand(input);
-    const response = await this.doRequest(() => client.send(command));
+    const response: any = await this.doRequest(() => client.send(command));
     if (response.HostedZones.length === 0) {
       throw new Error(`找不到 HostedZone ${name}`);
     }
@@ -102,20 +109,21 @@ export class AwsClient {
   }
 
   async route53ListHostedZonesPage(req: PageSearch): Promise<PageRes<DomainRecord>> {
-    const { ListHostedZonesByNameCommand } = await import("@aws-sdk/client-route-53"); // ES Modules import
+    const { ListHostedZonesByNameCommand } = await this.access.importRuntime("@aws-sdk/client-route-53"); // ES Modules import
 
     const client = await this.route53ClientGet();
-    const input: any = { // ListHostedZonesByNameRequest
+    const input: any = {
+      // ListHostedZonesByNameRequest
       MaxItems: req.pageSize,
     };
     if (req.searchKey) {
       input.DNSName = req.searchKey;
     }
     const command = new ListHostedZonesByNameCommand(input);
-    const response = await this.doRequest(() => client.send(command));
+    const response: any = await this.doRequest(() => client.send(command));
     let list: any[] = response.HostedZones || [];
     list = list.map((item: any) => ({
-      id: item.Id.replace('/hostedzone/', ''),
+      id: item.Id.replace("/hostedzone/", ""),
       domain: item.Name,
     }));
     return {
@@ -124,28 +132,44 @@ export class AwsClient {
     };
   }
 
-  async route53ChangeRecord(req: {
-    hostedZoneId: string, fullRecord: string, type: string, value: string, action: "UPSERT" | "DELETE"
-  }) {
-    const { ChangeResourceRecordSetsCommand } = await import("@aws-sdk/client-route-53"); // ES Modules import
-    // const { Route53Client, ChangeResourceRecordSetsCommand } = require("@aws-sdk/client-route-53"); // CommonJS import
-    // import type { Route53ClientConfig } from "@aws-sdk/client-route-53";
+  async route53ChangeRecord(req: { hostedZoneId: string; fullRecord: string; type: string; value: string; action: "UPSERT" | "DELETE" }) {
+    const recordType = req.type.toUpperCase();
+    const recordValue = `"${req.value}"`;
+    const existingRecord = await this.route53GetRecord(req.hostedZoneId, req.fullRecord, recordType);
+    const existingValues = existingRecord?.ResourceRecords || [];
+
+    let action: "UPSERT" | "DELETE" = "UPSERT";
+    let values = existingValues;
+    if (req.action === "UPSERT") {
+      if (existingValues.some(item => item.Value === recordValue)) {
+        return;
+      }
+      values = [...existingValues, { Value: recordValue }];
+    } else {
+      const remainingValues = existingValues.filter(item => item.Value !== recordValue);
+      if (remainingValues.length === existingValues.length) {
+        return;
+      }
+      if (remainingValues.length === 0) {
+        action = "DELETE";
+      } else {
+        values = remainingValues;
+      }
+    }
+
+    const { ChangeResourceRecordSetsCommand } = await this.access.importRuntime("@aws-sdk/client-route-53");
     const client = await this.route53ClientGet();
-    const input = { // ChangeResourceRecordSetsRequest
-      HostedZoneId: req.hostedZoneId, // required
-      ChangeBatch: { // ChangeBatch
-        Changes: [ // Changes // required
-          { // Change
-            Action: req.action as any, // required
-            ResourceRecordSet: { // ResourceRecordSet
-              Name: req.fullRecord, // required
-              Type: req.type.toUpperCase() as any,
-              ResourceRecords: [ // ResourceRecords
-                { // ResourceRecord
-                  Value: `"${req.value}"`, // required
-                },
-              ],
-              TTL: 60,
+    const input = {
+      HostedZoneId: req.hostedZoneId,
+      ChangeBatch: {
+        Changes: [
+          {
+            Action: action as any,
+            ResourceRecordSet: {
+              Name: req.fullRecord,
+              Type: recordType as any,
+              ResourceRecords: values,
+              TTL: existingRecord?.TTL || 60,
             },
           },
         ],
@@ -154,26 +178,135 @@ export class AwsClient {
     this.logger.info(`设置域名解析参数：${JSON.stringify(input)}`);
     const command = new ChangeResourceRecordSetsCommand(input);
     const response = await this.doRequest(() => client.send(command));
-    console.log('Add record successful:', JSON.stringify(response));
+    console.log("Add record successful:", JSON.stringify(response));
     await utils.sleep(3000);
     return response;
-    /*
-    // { // ChangeResourceRecordSetsResponse
-//   ChangeInfo: { // ChangeInfo
-//     Id: "STRING_VALUE", // required
-//     Status: "PENDING" || "INSYNC", // required
-//     SubmittedAt: new Date("TIMESTAMP"), // required
-//     Comment: "STRING_VALUE",
-//   },
-// };*/
+  }
+
+  private async route53GetRecord(hostedZoneId: string, fullRecord: string, type: string): Promise<any> {
+    const { ListResourceRecordSetsCommand } = await this.access.importRuntime("@aws-sdk/client-route-53");
+    const client = await this.route53ClientGet();
+    const command = new ListResourceRecordSetsCommand({
+      HostedZoneId: hostedZoneId,
+      StartRecordName: fullRecord,
+      StartRecordType: type,
+      MaxItems: "1",
+    });
+    const response: any = await this.doRequest(() => client.send(command));
+    const record = response.ResourceRecordSets?.[0];
+    if (!record || record.Type !== type || !this.route53RecordNamesMatch(record.Name, fullRecord)) {
+      return undefined;
+    }
+    return record;
+  }
+
+  private route53RecordNamesMatch(left: string, right: string): boolean {
+    return left.replace(/\.$/, "").toLowerCase() === right.replace(/\.$/, "").toLowerCase();
   }
 
   async doRequest<T>(call: () => Promise<T>): Promise<T> {
     try {
-      return await call();
-    } catch (err) {
-      this.logger.error(`调用接口失败:${err.Error?.Message || err.message},requestId:${err.requestId}`);
+      return await this.withRetry(call);
+    } catch (err: any) {
+      this.logger.error(`请求失败:${err.Error?.Message || err.message},requestId:${err.requestId}`);
       throw err;
     }
+  }
+
+  /**
+   * Retries an AWS SDK call with exponential backoff + jitter while the error is
+   * retryable. See {@link AwsClient.isRetryableAwsError}.
+   *
+   * `T` defaults to `any` so that call sites passing an untyped SDK client
+   * (`@aws-sdk/*` is a lazyDependency and has no types at build time) don't
+   * collapse the result to `unknown`.
+   */
+  async withRetry<T = any>(call: () => Promise<T>, maxAttempts = 5, baseDelayMs = 2000): Promise<T> {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await call();
+      } catch (err: any) {
+        if (attempt >= maxAttempts || !AwsClient.isRetryableAwsError(err)) {
+          throw err;
+        }
+        const code = err?.name || err?.Code || err?.code || err?.$metadata?.httpStatusCode || "unknown";
+        const ceiling = baseDelayMs * Math.pow(2, attempt - 1); // 2s, 4s, 8s, 16s …
+        const delay = Math.round(ceiling / 2 + Math.random() * (ceiling / 2)); // equal jitter: ~1-2s, ~2-4s, ~4-8s, ~8-16s
+        this.logger.warn(`AWS request failed (${code}), attempt ${attempt}/${maxAttempts}, retrying in ${delay}ms…`);
+        await utils.sleep(delay);
+      }
+    }
+    throw new Error("Unreachable");
+  }
+
+  /**
+   * Detects AWS errors that are safe to retry. Because we disable the SDK's own
+   * retries (maxAttempts: 1 on every client), this is the single source of truth
+   * and covers what the SDK's `standard` strategy would have retried:
+   *  - throttling / rate-limit codes across ACM / STS / CloudFront / Route53,
+   *    including Route53's PriorRequestNotComplete concurrent-change limit;
+   *  - SDK v3 retry hints (`$retryable`);
+   *  - transient HTTP 429 and 5xx;
+   *  - connection-level errors (ECONNRESET, ETIMEDOUT, EAI_AGAIN, …).
+   */
+  static isRetryableAwsError(err: any): boolean {
+    if (!err) {
+      return false;
+    }
+    const retryableCodes = new Set([
+      "TooManyRequestsException",
+      "ThrottlingException",
+      "ThrottledException",
+      "RequestLimitExceeded",
+      "RequestThrottled",
+      "Throttling",
+      "SlowDown",
+      "PriorRequestNotComplete",
+      "RequestTimeout",
+      "RequestTimeoutException",
+      "TimeoutError",
+    ]);
+    const connectionCodes = new Set(["ECONNRESET", "ECONNREFUSED", "EPIPE", "ETIMEDOUT", "EAI_AGAIN", "ENOTFOUND", "EHOSTUNREACH", "ENETUNREACH"]);
+    const code = err.name || err.Code || err.code || "";
+    const httpStatus = err.$metadata?.httpStatusCode;
+    return (
+      retryableCodes.has(code) ||
+      connectionCodes.has(err.code) ||
+      err.$retryable != null ||
+      httpStatus === 429 ||
+      (typeof httpStatus === "number" && httpStatus >= 500) ||
+      (typeof err.message === "string" && err.message.toLowerCase().includes("rate exceeded"))
+    );
+  }
+
+  /**
+   * Polls a CloudFront distribution until its Status becomes "Deployed".
+   * CloudFront propagates changes globally and can take several minutes.
+   */
+  async waitForDistributionDeployed(cloudFrontClient: any, distributionId: string, timeoutMs = 600_000, pollIntervalMs = 15_000): Promise<void> {
+    const { GetDistributionCommand } = await this.access.importRuntime("@aws-sdk/client-cloudfront");
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      let status: string | undefined;
+      try {
+        const res: any = await this.withRetry(() => cloudFrontClient.send(new GetDistributionCommand({ Id: distributionId })));
+        status = res?.Distribution?.Status;
+      } catch (err: any) {
+        // A retryable error that outlives withRetry's budget shouldn't abort the whole deploy;
+        // keep polling until the deadline and let genuine (non-retryable) errors propagate.
+        if (!AwsClient.isRetryableAwsError(err)) {
+          throw err;
+        }
+        this.logger.warn(`CloudFront status check failed (${err?.name || err?.code}), will retry on next poll…`);
+        await utils.sleep(pollIntervalMs);
+        continue;
+      }
+      this.logger.info(`CloudFront distribution ${distributionId} status: ${status}`);
+      if (status === "Deployed") {
+        return;
+      }
+      await utils.sleep(pollIntervalMs);
+    }
+    throw new Error(`Timed out waiting for CloudFront distribution ${distributionId} to reach Deployed status`);
   }
 }

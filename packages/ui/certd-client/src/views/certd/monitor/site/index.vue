@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <fs-page>
     <template #header>
       <div class="title flex items-center">
@@ -6,7 +6,7 @@
         <div class="sub flex-1">
           <div>
             {{ t("monitor.description") }}
-            <router-link to="/certd/monitor/setting">{{ t("monitor.settingLink") }}</router-link>
+            <router-link to="/cert/monitor/setting">{{ t("monitor.settingLink") }}</router-link>
           </div>
           <div class="flex items-center">
             {{ t("monitor.limitInfo") }}
@@ -27,8 +27,8 @@
 
 <script lang="ts" setup>
 import { useFs } from "@fast-crud/fast-crud";
-import { onActivated, onMounted } from "vue";
 import createCrudOptions from "./crud";
+import { useMounted } from "/@/use/use-mounted";
 import { useI18n } from "/src/locales";
 const { t } = useI18n();
 defineOptions({
@@ -42,12 +42,5 @@ const context: any = {
 const { crudBinding, crudRef, crudExpose } = useFs({ createCrudOptions, context });
 
 const handleBatchDelete = context.handleBatchDelete;
-
-// 页面打开后获取列表数据
-onMounted(() => {
-  crudExpose.doRefresh();
-});
-onActivated(() => {
-  crudExpose.doRefresh();
-});
+useMounted(() => crudExpose.doRefresh());
 </script>

@@ -13,6 +13,8 @@ describe("shouldSetDefaultNoCache", () => {
   });
 
   it("keeps explicit cache headers from file responses", () => {
+    assert.equal(shouldSetDefaultNoCache("/", "public,max-age=259200"), true);
+    assert.equal(shouldSetDefaultNoCache("/index.html", "public,max-age=259200"), true);
     assert.equal(shouldSetDefaultNoCache("/api/basic/file/download", "public,max-age=259200"), false);
   });
 

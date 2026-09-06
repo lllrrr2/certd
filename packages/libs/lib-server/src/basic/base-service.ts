@@ -1,10 +1,10 @@
-import { PermissionException, ValidateException } from './exception/index.js';
-import { FindOneOptions, In, Repository, SelectQueryBuilder } from 'typeorm';
-import { Inject } from '@midwayjs/core';
-import { TypeORMDataSourceManager } from '@midwayjs/typeorm';
-import { EntityManager } from 'typeorm/entity-manager/EntityManager.js';
-import { FindManyOptions } from 'typeorm';
-import { Constants } from './constants.js';
+import { PermissionException, ValidateException } from "./exception/index.js";
+import { EntityTarget, FindOneOptions, In, Repository, SelectQueryBuilder } from "typeorm";
+import { Inject } from "@midwayjs/core";
+import { TypeORMDataSourceManager } from "@midwayjs/typeorm";
+import { EntityManager } from "typeorm/entity-manager/EntityManager.js";
+import { FindManyOptions } from "typeorm";
+import { Constants } from "./constants.js";
 
 export type PageReq<T = any> = {
   page?: { offset: number; limit: number };
@@ -20,6 +20,10 @@ export type ListReq<T = any> = {
   select?: any;
 };
 
+export type ServiceContext = {
+  manager?: EntityManager;
+};
+
 /**
  * 服务基类
  */
@@ -30,8 +34,36 @@ export abstract class BaseService<T> {
   abstract getRepository(): Repository<T>;
 
   async transaction(callback: (entityManager: EntityManager) => Promise<any>) {
-    const dataSource = this.dataSourceManager.getDataSource('default');
+    const dataSource = this.dataSourceManager.getDataSource("default");
     return await dataSource.transaction(callback as any);
+  }
+
+  /**
+   * 如果 ctx 有 manager 则复用已有事务，否则开启新事务
+   */
+  protected async transactionWithCtx<T>(ctx: ServiceContext, callback: (manager: EntityManager) => Promise<T>): Promise<T> {
+    if (ctx.manager) {
+      return await callback(ctx.manager);
+    }
+    return (await this.transaction(callback)) as T;
+  }
+
+  protected getRepo<E>(ctx: ServiceContext, entity: EntityTarget<E>): Repository<E> {
+    if (ctx.manager) {
+      return ctx.manager.getRepository(entity);
+    }
+    const dataSource = this.dataSourceManager.getDataSource("default");
+    return dataSource.getRepository(entity);
+  }
+
+  public buildUserProjectQuery(userId: number, projectId?: number) {
+    const query: { userId: number; projectId?: number; [key: string]: any } = {
+      userId,
+    };
+    if (projectId != null) {
+      query.projectId = projectId;
+    }
+    return query;
   }
 
   /**
@@ -41,9 +73,12 @@ export abstract class BaseService<T> {
    */
   async info(id, infoIgnoreProperty?): Promise<T | null> {
     if (!id) {
-      throw new ValidateException('id不能为空');
+      throw new ValidateException("id不能为空");
     }
-    const info = await this.getRepository().findOneBy({ id } as any);
+    const info = await this.getRepository().findOne({
+      //@ts-ignore
+      where: { id },
+    });
     if (info && infoIgnoreProperty) {
       for (const property of infoIgnoreProperty) {
         delete info[property];
@@ -71,6 +106,25 @@ export abstract class BaseService<T> {
   }
 
   /**
+   * 按条件直接更新，不触发子类 update 的业务生命周期。
+   */
+  async updateWhere(where: any, data: any) {
+    await this.getRepository().update(
+      {
+        ...where,
+      },
+      data
+    );
+  }
+
+  async updateById(data: any) {
+    if (!data.id) {
+      throw new ValidateException("id 不能为空");
+    }
+    await this.addOrUpdate(data);
+  }
+
+  /**
    * 删除
    * @param ids 删除的ID集合 如：[1,2,3] 或者 1,2,3
    * @param where
@@ -81,24 +135,24 @@ export abstract class BaseService<T> {
     if (idArr.length === 0) {
       return;
     }
-  
+
     await this.getRepository().delete({
       id: In(idArr),
       ...where,
     });
     await this.modifyAfter(idArr);
-    return ids
+    return ids;
   }
 
   resolveIdArr(ids: string | any[]) {
     if (!ids) {
-      throw new ValidateException('ids不能为空');
+      throw new ValidateException("ids不能为空");
     }
-    if (typeof ids === 'string') {
-      return ids.split(',');
-    } else if(!Array.isArray(ids)){
+    if (typeof ids === "string") {
+      return ids.split(",");
+    } else if (!Array.isArray(ids)) {
       return [ids];
-    }else {
+    } else {
       return ids;
     }
   }
@@ -115,10 +169,11 @@ export abstract class BaseService<T> {
    * 新增
    * @param param 数据
    */
-  async add(param: any) {
+  async add(param: any): Promise<{ id: number; [key: string]: any }> {
     const now = new Date();
     param.createTime = now;
     param.updateTime = now;
+    delete param.id;
     await this.addOrUpdate(param);
     await this.modifyAfter(param);
     return {
@@ -131,7 +186,9 @@ export abstract class BaseService<T> {
    * @param param 数据
    */
   async update(param: any) {
-    if (!param.id) throw new ValidateException('id 不能为空');
+    if (!param.id) {
+      throw new ValidateException("id 不能为空");
+    }
     param.updateTime = new Date();
     await this.addOrUpdate(param);
     await this.modifyAfter(param);
@@ -169,10 +226,10 @@ export abstract class BaseService<T> {
   }
 
   private buildListQuery(listReq: ListReq<T>) {
-    const { query, sort, buildQuery,select } = listReq;
-    const qb = this.getRepository().createQueryBuilder('main');
+    const { query, sort, buildQuery, select } = listReq;
+    const qb = this.getRepository().createQueryBuilder("main");
     if (select) {
-      qb.setFindOptions({select});
+      qb.setFindOptions({ select });
     }
     if (query) {
       const keys = Object.keys(query);
@@ -191,10 +248,10 @@ export abstract class BaseService<T> {
         }
       });
       if (found) {
-        qb.addOrderBy('main.' + sort.prop, sort.asc ? 'ASC' : 'DESC');
+        qb.addOrderBy("main." + sort.prop, sort.asc ? "ASC" : "DESC");
       }
     }
-    qb.addOrderBy('id', 'DESC');
+    qb.addOrderBy("id", "DESC");
     //自定义query
     if (buildQuery) {
       buildQuery(qb);
@@ -211,17 +268,16 @@ export abstract class BaseService<T> {
     return await qb.getMany();
   }
 
-  async checkUserId(ids: number | number[] = 0, userId: number, userKey = 'userId') {
+  async checkUserId(ids: number | number[] = 0, userId: number, userKey = "userId") {
     if (ids == null) {
-      throw new ValidateException('id不能为空');
+      throw new ValidateException("id不能为空");
     }
     if (userId == null) {
-      throw new ValidateException('userId不能为空');
+      throw new ValidateException("userId不能为空");
     }
     if (!Array.isArray(ids)) {
       ids = [ids];
     }
-    ids = this.filterIds(ids);
     const res = await this.getRepository().find({
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore
@@ -234,53 +290,59 @@ export abstract class BaseService<T> {
       },
     });
     if (!res || res.length === ids.length) {
-      return;
+      return ids;
     }
-    throw new PermissionException('权限不足');
+    throw new PermissionException("权限不足");
   }
 
- filterIds(ids: any[]) {
+  filterIds(ids: any[]) {
     if (!ids) {
-      throw new ValidateException('ids不能为空');
+      throw new ValidateException("ids不能为空");
     }
-    return ids.filter((item) => {
-      return item!=null && item != ""
+    return ids.filter(item => {
+      return item != null && item != "";
     });
   }
-  async batchDelete(ids: number[], userId: number,projectId?:number) {
+  async batchDelete(ids: number[], userId: number, projectId?: number): Promise<number> {
+    if (!ids || ids.length === 0) {
+      throw new ValidateException("ids不能为空");
+    }
+    if (!Array.isArray(ids)) {
+      ids = [ids];
+    }
     ids = this.filterIds(ids);
-    if(userId!=null){
+    if (userId != null) {
+      const userProjectQuery = this.buildUserProjectQuery(userId, projectId);
       const list = await this.getRepository().find({
         where: {
           // @ts-ignore
           id: In(ids),
-          userId,
-          projectId,
+          ...userProjectQuery,
         },
-      })
+      });
       // @ts-ignore
-      ids = list.map(item => item.id)
+      ids = list.map(item => item.id);
     }
 
     await this.delete(ids);
+    return ids.length;
   }
 
   async findOne(options: FindOneOptions<T>) {
     return await this.getRepository().findOne(options);
   }
-
 }
 
 export function checkUserProjectParam(userId: number, projectId: number) {
-  if (projectId != null ){
-    if( userId !== Constants.enterpriseUserId) {
-      throw new ValidateException('userId projectId 错误');
+  if (projectId != null) {
+    if (userId !== Constants.enterpriseUserId) {
+      throw new ValidateException("userId projectId 错误");
     }
-    return true
-  }else{
-    if( userId != null) {
-      return true
+    return true;
+  } else {
+    if (userId != null) {
+      return true;
     }
-     throw new ValidateException('userId不能为空');
+    throw new ValidateException("userId不能为空");
   }
 }

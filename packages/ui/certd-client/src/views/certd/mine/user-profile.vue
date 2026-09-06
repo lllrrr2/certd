@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <fs-page class="page-user-profile">
     <template #header>
       <div class="title">{{ t("certd.myInfo") }}</div>
@@ -108,6 +108,10 @@
                   <div class="passkey-name">{{ passkey.deviceName }}</div>
                   <div class="passkey-meta flex items-center">
                     <span class="meta-item flex items-center">
+                      <fs-icon icon="ion:globe-outline" class="meta-icon" />
+                      {{ passkey.rpId || "-" }}
+                    </span>
+                    <span class="meta-item flex items-center">
                       <fs-icon icon="ion:calendar-outline" class="meta-icon" />
                       {{ formatDate(passkey.registeredAt) }}
                     </span>
@@ -150,7 +154,7 @@ import ChangePasswordButton from "/@/views/certd/mine/change-password-button.vue
 import { useI18n } from "/src/locales";
 import { useContactBind, useUserProfile } from "./use";
 import { usePasskeyRegister } from "./use";
-import { message, Modal, notification } from "ant-design-vue";
+import { Modal, notification } from "ant-design-vue";
 import { useSettingStore } from "/@/store/settings";
 import { isEmpty } from "lodash-es";
 import { dict } from "@fast-crud/fast-crud";
@@ -196,7 +200,7 @@ function doUpdate() {
 
 const router = useRouter();
 function goSecuritySetting() {
-  router.push("/certd/mine/security");
+  router.push("/cert/mine/security");
 }
 
 const oauthBounds = ref([]);
@@ -304,7 +308,7 @@ async function registerPasskey() {
         return;
       }
       await doRegisterPasskey(deviceName);
-      message.success("Passkey注册成功");
+      notification.success({ message: "Passkey注册成功" });
     },
   });
 }
@@ -454,9 +458,11 @@ onMounted(async () => {
     }
 
     .card-header {
+      background: linear-gradient(145deg, #1e1e1e, #252525);
+
       .header-bg-gradient {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        opacity: 0.15;
+        background: rgba(255, 255, 255, 0.04);
+        opacity: 1;
       }
     }
 
@@ -472,12 +478,30 @@ onMounted(async () => {
 
       .detail-tag {
         background: #3b3b3b;
+        border-color: rgba(255, 255, 255, 0.12);
         color: #e5e5e5;
 
         .tag-icon {
           color: #e5e5e5;
         }
       }
+    }
+
+    .card-title {
+      border-bottom-color: rgba(255, 255, 255, 0.1);
+    }
+
+    .binding-icon {
+      background: linear-gradient(135deg, rgba(102, 126, 234, 0.22) 0%, rgba(160, 120, 234, 0.22) 100%);
+    }
+
+    .passkey-icon {
+      background: linear-gradient(135deg, rgba(17, 153, 142, 0.22) 0%, rgba(56, 239, 125, 0.22) 100%);
+    }
+
+    .binding-icon .icon,
+    .passkey-icon .icon {
+      color: rgba(255, 255, 255, 0.7);
     }
 
     .bindings-list {
@@ -572,8 +596,9 @@ onMounted(async () => {
   .bindings-card,
   .passkey-card {
     background: #fff;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
     overflow: hidden;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
     transition: all 0.3s ease;
     margin: 5px;
   }
@@ -586,13 +611,15 @@ onMounted(async () => {
   .profile-card:hover,
   .bindings-card:hover,
   .passkey-card:hover {
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+    border-color: rgba(148, 163, 184, 0.34);
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.1);
     transform: translateY(-2px);
   }
 
   .card-header {
     position: relative;
     padding: 40px 30px;
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.9)), hsl(var(--card));
   }
 
   .header-bg-gradient {
@@ -601,8 +628,8 @@ onMounted(async () => {
     left: 0;
     right: 0;
     height: 100%;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    opacity: 0.08;
+    background: radial-gradient(circle at 14% 22%, rgba(52, 120, 246, 0.08), transparent 34%), radial-gradient(circle at 86% 18%, rgba(197, 138, 53, 0.08), transparent 32%);
+    opacity: 1;
   }
 
   .header-content {
@@ -631,14 +658,14 @@ onMounted(async () => {
     padding: 0;
     color: #667eea;
     background: #ffffff;
-    border: 1px solid #e5e7eb;
+    border: 1px solid rgba(148, 163, 184, 0.34);
     border-radius: 50%;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
   }
 
   .user-avatar {
     border: 4px solid #ffffff;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 8px 22px rgba(15, 23, 42, 0.12);
   }
 
   .status-indicator {
@@ -678,7 +705,9 @@ onMounted(async () => {
     align-items: center;
     gap: 6px;
     padding: 6px 12px;
-    border-radius: 20px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.72);
     font-size: 13px;
   }
 
